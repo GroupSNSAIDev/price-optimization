@@ -29,7 +29,7 @@ S = {
     "cellb": ParagraphStyle("cellb", fontName="Helvetica-Bold", fontSize=8.3, leading=10.5, textColor=colors.white),
     "num": ParagraphStyle("num", fontName="Helvetica-Bold", fontSize=8.3, leading=10.5, textColor=PURPLE),
 }
-STATUS = {"Done": "#2E7D32", "Draft": "#B26A00", "To do": "#4A5A8A", "Needs data": "#A23B3B", "At go-live": "#6B6B6B",
+STATUS = {"Done": "#2E7D32", "Provisional": "#7A8C2E", "Draft": "#B26A00", "To do": "#4A5A8A", "Needs data": "#A23B3B", "At go-live": "#6B6B6B",
           "Later": "#6B6B6B"}
 
 # (step, what we do / what we tested and chose, data science steps, Six Sigma steps, status)
@@ -52,7 +52,8 @@ STEPS = [
      "Descriptive statistics, KPI baseline",
      "Baseline measurement, current-state value stream", "To do"),
     ("Pricing rules catalogue (20 rules)",
-     "Each rule hard (never break) or soft (flag), with owner and data source. 8 items wait for the business.",
+     "Each rule hard (never break) or soft (flag), with owner and data source. 8 items wait for the business. Rule 20 (label "
+     "capacity per wave) cannot be checked until the business gives the number, so 19 are checked automatically.",
      "Business rules turned into model constraints",
      "Requirements capture, poka-yoke design", "Draft"),
     ("Questions for the business (PDF)",
@@ -90,6 +91,11 @@ STEPS = [
      "clearance prices; below-cost weeks.",
      "Robust outlier detection (median / robust SD), anomaly flags",
      "Special-cause variation", "Done"),
+    ("Stock-out weeks",
+     "Weeks out of stock or with few selling days are left out of the price-sensitivity data (sales limited by supply, not "
+     "price). The demand forecast does not yet correct those weeks for lost sales, so it can understate demand.",
+     "Censored demand, lost-sales correction (unconstraining)",
+     "Special-cause variation", "To do"),
     ("Data grain and aggregation",
      "Article x store x week, and article x week for the chain (371K rows); store ramp-up weeks and low availability marked.",
      "Aggregation, panel data structure",
@@ -178,7 +184,8 @@ STEPS = [
      "Standardisation (StandardScaler)",
      "-", "Done"),
     ("Multicollinearity check",
-     "Inputs with VIF above 10 dropped for the linear set.",
+     "Tested: a reduced linear set without inputs whose VIF is above 10. It lost to keeping all 50 inputs (next step), so no "
+     "input was dropped.",
      "VIF (variance inflation factor)",
      "Screening of Xs", "Done"),
     ("Regularised selection",
@@ -218,7 +225,8 @@ STEPS = [
      "Empirical Bayes shrinkage, hierarchical models",
      "Rational subgrouping", "Done"),
     ("Rise vs cut",
-     "Rises and cuts measured separately on real price events (rise -5 to -0.2, cut -4 to -0.1).",
+     "Rises and cuts measured separately on real price events, each with its own limits: rise -5 to -0.2, cut -4 to -0.1 "
+     "(the overall elasticity keeps -4 to -0.2, next step but one).",
      "Asymmetric response",
      "Stratification", "Done"),
     ("Switching between substitutes",
@@ -226,14 +234,23 @@ STEPS = [
      "Cross-price elasticity, diversion ratio",
      "Interaction effects", "Done"),
     ("Limits and confidence",
-     "Limits -4 to -0.2. Confidence High 518 / Medium 1,214 / Low 2,080; Low uses a cautious value.",
+     "Overall elasticity limits -4 to -0.2. Confidence High 518 / Medium 1,214 / Low 2,080; Low uses a cautious value.",
      "Bounded estimates, uncertainty scoring",
      "Risk-based decisions", "Done"),
     ("Back-test of price response",
-     "Price changes from 11 May 2026 held out. Calibration slope about 0.28: real short-run reactions are about 2x weaker "
-     "than the model, so the plan is cautious.",
+     "Price changes from 11 May 2026 held out. Behaviour-cluster pooling scored best, but the evidence is weak: calibration "
+     "slope 0.28 (+/- 0.18), correlation 0.03, only 1% better than assuming no price effect. The back-test cannot confirm the "
+     "size of the price effects. It was also used to choose the pooling method, so it is not a fully fresh test; the holdout "
+     "stores give the fresh test.",
      "Out-of-sample validation, calibration slope, placebo noise, interval coverage",
      "Verify root cause, model validation", "Done"),
+    ("Independent check of price effects",
+     "Prices can follow demand, which biases estimates. Tested with cost and FX changes as an outside driver of price (IV). "
+     "Validity test failed: unit cost (COGS / units) moves with demand even when price does not, so this check cannot be "
+     "trusted with today's data; it needs supplier invoice prices. Side result: plain 4-week slopes rank the bands like the "
+     "model (highly elastic -2.85 vs -3.18, elastic -1.64 vs -1.46, moderate -0.84 vs -0.75, inelastic -0.60 vs -0.24).",
+     "Endogeneity, instrumental variables (2SLS), exclusion test, first-stage F",
+     "Verify root cause, MSA of the input", "Done"),
     ("Sensitivity by store class",
      "A -1.05, B -1.15, C -1.22, P -1.37, wholesale -0.87: one chain price kept, with store exceptions.",
      "Segment-level estimation",
@@ -277,7 +294,8 @@ STEPS = [
      "Seasonal indices, analogue years",
      "Common-cause variation", "Done"),
     ("52-week forecast with ranges",
-     "3,244 articles x 52 weeks from 9 Nov 2026, low / high range (width capped at 1.5x).",
+     "3,244 articles with enough history x 52 weeks from 9 Nov 2026 (all but 4 of the 2,360 in scope), low / high range "
+     "(width capped at 1.5x).",
      "Prediction intervals, coverage check",
      "-", "Done"),
     ("Explainability",
@@ -304,6 +322,12 @@ STEPS = [
     ("Profit grid",
      "Profit = price without IVA - latest cost, with FX and inflation cost drift; profit gained by substitutes counted.",
      "Profit simulation, uncertainty bands",
+     "Y = f(X) transfer function", "Provisional"),
+    ("How forecast and price effect combine",
+     "Units at a new price = base forecast at today's price x (1 + change) ^ elasticity, using the rise or cut value from the "
+     "price-sensitivity steps (cautious case 1.5x stronger), plus switching to substitutes. The forecast model's own price "
+     "effect is used only as a cross-check (explainability step), not in the optimiser.",
+     "Structural demand model on top of an ML baseline",
      "Y = f(X) transfer function", "Done"),
     ("Cost pass-through scan",
      "Cost change vs price change over 26 weeks; catch-up suggestion.",
@@ -322,15 +346,21 @@ STEPS = [
      "not fall; no rise if repriced 15% in 26 weeks; no cut on supply risk; never below cost; KVIs held; tail = cost "
      "pass-through; smallest move giving 90% of the gain.",
      "Constrained optimisation",
-     "CTQs as specification limits", "Done"),
+     "CTQs as specification limits", "Provisional"),
     ("Optimiser",
      "Coordinate ascent +$3.41M but 556 price-order breaks; MILP +$2.25M with 0 breaks. MILP chosen.",
      "Mixed-integer linear programming (HiGHS) vs heuristic search",
-     "Solution selection matrix", "Done"),
+     "Solution selection matrix", "Provisional"),
     ("Profit vs units frontier",
      "Unit-loss limit 5 / 10 / 15 / 20%: $1.53M / $2.20M / $2.49M / $2.61M a year.",
      "Pareto frontier",
      "Trade-off analysis", "Done"),
+    ("Profit bridge",
+     "MILP $2.25M -> trim to the smallest move keeping 90% of each gain -$78K -> plan $2.18M (Wave 1 $613K + Review $1.38M + "
+     "Test $130K + Hold $59K) -> rounding -$5.6K -> $2.17M. Cautious $1.97M. The frontier figure ($2.20M) is a separate run with "
+     "one 10% limit for every article, not the plan.",
+     "Reconciliation",
+     "Benefit tracking", "Done"),
     ("Scenarios",
      "Cautious / likely / optimistic; cost drift +$2.24M; FX +10% +$2.21M; KVIs unlocked +$2.79M.",
      "Scenario and stress testing, sensitivity analysis",
@@ -353,21 +383,33 @@ STEPS = [
      "Rule engine",
      "Standard work", "Done"),
     ("Business rules check",
-     "19 rules per article: 0 failures, 954 flags (mostly the 14% IVA price gap).",
+     "19 of the 20 rules checked per article (rule 20 waits for the label capacity): 0 failures, 954 flags (mostly the 14% IVA "
+     "price gap).",
      "Automated validation",
-     "Poka-yoke", "Done"),
+     "Poka-yoke", "Provisional"),
     ("Reason per article",
      "Plain-language reason for each change.",
      "Explainable output",
      "Visual management", "Done"),
     ("Rollout waves",
-     "Wave 1: 522 articles ($613K); Review: 704 ($1.38M); Test: 104 ($130K); Hold: 1,914.",
+     "1,330 changes: Wave 1 522 articles ($613K); Review then Wave 1 704 ($1.38M); Test 104 ($130K). Hold 2,482 = 1,030 on the "
+     "shelf with no change (474 no gainful move, 440 tail rule, 112 KVIs held, 4 no price or cost) + 1,452 not on the shelf. "
+     "Held articles still gain $59K from shoppers switching to them.",
      "Risk-based staging",
-     "Pilot, phased rollout", "Done"),
-    ("Holdout control stores",
-     "30 matched store pairs keep old prices; a 4-week test detects a change of 7.6%.",
-     "Matched pairs, placebo test, minimum detectable effect (power)",
+     "Pilot, phased rollout", "Provisional"),
+    ("Holdout control stores, sized on GP",
+     "30 matched store pairs keep old prices. Measured on GP (net of IVA) of the changed articles: a 4-week test detects a "
+     "change of 11.2%; the plan expects +23.9% GP on those articles, so the gain is detectable from week 4. Units (-4.8%) and "
+     "sales (+0.1%) changes are too small to detect, so they are watched only for big falls.",
+     "Matched pairs, placebo test, statistical power, minimum detectable effect",
      "DOE, control group", "Done"),
+    ("Rollback rules",
+     "Per wave, changed vs holdout stores: pause the next wave if GP of changed articles is below +15.9% after 4 weeks; roll "
+     "back if GP is below -8.0%, or units below -16.8% after 4 weeks. Per article: roll back if units fall more than 2x the "
+     "planned loss and more than 15% for 4 weeks, or an Everyday KVI family loses more than 10%. Hard stops: below cost, wrong "
+     "IVA, till price differs from approved.",
+     "Decision thresholds from placebo noise (2-3 SD)",
+     "Reaction plan, control limits", "Done"),
     ("Impact for any date window",
      "Weekly impact for 52 weeks; the user picks start and end. Example 30 Nov - 31 Jan: +$380K.",
      "Aggregation",
@@ -375,7 +417,7 @@ STEPS = [
     ("Excel price list",
      "Prices, reasons, rules, waves, store exceptions, holdout pairs, date windows.",
      "Reporting",
-     "-", "Done"),
+     "-", "Provisional"),
     ("Business deck (USD, Newaco theme)",
      "Waits for the IVA and KVI answers.",
      "Data storytelling",
@@ -388,8 +430,18 @@ STEPS = [
      "Train category teams to read and review the list; how to override and why; who signs off.",
      "-",
      "Change management, RACI, training plan", "To do"),
-    ("Reproducibility",
-     "Scripts in a fixed run order, fixed random seed (2026), cached steps, backups before each refresh.",
+    ("Articles with no recommendation",
+     "1,452 active articles not on the shelf (10.8% of sales) and new launches: a simple rule (cost pass-through + margin "
+     "floor, reviewed when they return to the shelf).",
+     "Rule-based fallback",
+     "Standard work", "To do"),
+    ("Independent model review",
+     "A second analyst checks the data steps, models, code and results before go-live.",
+     "Code and model review",
+     "Peer review, verification", "To do"),
+    ("Reproducibility and version control",
+     "Scripts in a fixed run order, fixed random seed (2026), cached steps, backups before each refresh; code and method docs "
+     "in git from 16 Nov 2026 (data and credentials kept out).",
      "Reproducible pipeline",
      "Standard work", "Done"),
     ("Approval workflow",
@@ -400,6 +452,11 @@ STEPS = [
      "Approved prices vs prices loaded in the till, every release.",
      "Data reconciliation",
      "Poka-yoke, MSA", "At go-live"),
+    ("Shelf labels",
+     "Print and place labels for each wave (label count per store per wave is in the price list); audit that shelf price = "
+     "till price in a sample of stores.",
+     "Sampling audit",
+     "Poka-yoke, MSA, p-chart", "At go-live"),
     ("Execution compliance",
      "Selling price from sales data vs approved price, per store.",
      "Monitoring from transaction data",
@@ -409,9 +466,14 @@ STEPS = [
      "Monitoring, alerting",
      "SPC, Cpk at least 1.33", "At go-live"),
     ("Measure the real gain",
-     "After 4 weeks: test vs holdout stores, read with finance.",
+     "GP of changed vs holdout stores, first read at week 4 (detectable), final read at week 8, with finance.",
      "Difference-in-differences (causal inference)",
      "Verify improvement, benefit sign-off", "At go-live"),
+    ("Store traffic and price image",
+     "Tickets per store, basket size and KVI units in changed vs holdout stores; slow switching to rival stores watched over "
+     "months, not weeks.",
+     "Monitoring, difference-in-differences",
+     "SPC, CTQ guardrail", "At go-live"),
     ("Model monitoring and refresh",
      "Quarterly re-estimation; drift check; a new model must beat the current one.",
      "Drift detection, retraining, champion-challenger",
@@ -424,6 +486,11 @@ STEPS = [
      "Which promotions make or lose money; promo weeks kept out of the base demand.",
      "Uplift / incrementality modelling",
      "Pareto of loss-making promos", "Needs data"),
+    ("Supplier invoice prices",
+     "Purchase price per unit by date, independent of store sales: needed for a valid independent check of price effects "
+     "and for exact cost pass-through.",
+     "Clean instrument for IV",
+     "Data collection plan", "Needs data"),
     ("Competitor prices and price image",
      "KVI prices vs rivals; price index tracked over time.",
      "Price index, competitive response",
@@ -453,8 +520,11 @@ NOT_USED = [
 ]
 
 LIMITS = [
-    ["Model reactions too strong", "Short-run reactions are about 2x weaker than the model says (calibration slope 0.28).",
-     "Cautious values used; real gain measured with holdout stores."],
+    ["Size of price effects not proven", "Back-test slope 0.28 (+/- 0.18), correlation 0.03, only 1% better than no effect; "
+     "the independent check could not run (cost moves with demand).",
+     "Guardrails, small steps, waves, holdout test on GP from week 4, rollback rules."],
+    ["Back-test reused for model choice", "The same back-test chose the pooling method.", "Holdout stores give the fresh test."],
+    ["Stock-out lost sales", "Forecast not corrected for weeks without stock.", "Lost-sales correction step added."],
     ["Many articles with little evidence", "2,080 articles have Low confidence.", "Cautious value, small steps, review wave."],
     ["Forecast error", "WAPE 42.6% per article-week (32.7% over 13 weeks).", "Ranges shown; gain read over months, not weeks."],
     ["Sales include IVA", "Margin depends on the IVA answer from finance.", "Net of IVA used until finance confirms."],
@@ -462,11 +532,14 @@ LIMITS = [
     ["No promo, competitor or rebate data", "Promotion and price-image effects are not in the model.", "Listed as data requests."],
     ["Monthly stock only", "Stock link uses monthly closing stock, not daily.", "Weekly cover estimated; daily stock requested."],
     ["Hyperparameters not tuned", "Accuracy could improve a little.", "Tuning step added."],
+    ["No rule yet for articles off the shelf", "1,452 articles (10.8% of sales) and new launches.", "Fallback rule step added."],
 ]
 
 TIMELINE = [
+    ["1", "Map today's pricing process; send data requests (promo calendar and competitor prices: commercial; rebates and "
+          "supplier invoice prices: finance; regulated prices: finance / legal)", "Pricing owner + data science; finance; commercial"],
     ["1-2", "Business answers; to-do steps: today's performance, Cpk baseline, stock link, markdown optimisation, risk review, "
-            "hyperparameter tuning", "Business (finance, commercial) + data science"],
+            "hyperparameter tuning, lost-sales correction, fallback rule, independent review", "Business (finance, commercial) + data science"],
     ["3", "Re-run the plan with the answers; business deck; review with category managers", "Data science + category managers"],
     ["4", "Approval; training; load Wave 1 to POS; holdout stores kept", "Pricing owner, IT"],
     ["5-8", "Wave 1 live; weekly compliance and control charts", "Pricing owner, data science"],
@@ -534,7 +607,7 @@ def on_cover(c, doc):
     c.setStrokeColor(GOLD); c.setLineWidth(0.8)
     c.line(x, 52 * mm, w - 20 * mm, 52 * mm)
     meta = [("Prepared for", "Fresmart management"), ("Prepared by", "Price optimisation team"),
-            ("Version", "1.0"), ("Date", "16 November 2026")]
+            ("Version", "1.1"), ("Date", "16 November 2026")]
     colw = (w - 40 * mm) / len(meta)
     for i, (k, v) in enumerate(meta):
         c.setFillColor(GOLD); c.setFont("Helvetica-Bold", 8.5)
@@ -552,7 +625,7 @@ def on_page(c, doc):
     c.setFont("Helvetica-Bold", 8); c.setFillColor(PURPLE)
     c.drawString(20 * mm, h - 9 * mm, REPORT_TITLE.upper())
     c.setFont("Helvetica", 8); c.setFillColor(GREY)
-    c.drawRightString(w - 20 * mm, h - 9 * mm, "Method report · v1.0 · Confidential")
+    c.drawRightString(w - 20 * mm, h - 9 * mm, "Method report · v1.1 · Confidential")
     c.setStrokeColor(colors.HexColor("#D9D2DB")); c.setLineWidth(0.5)
     c.line(20 * mm, h - 11 * mm, w - 20 * mm, h - 11 * mm)
     c.setStrokeColor(GOLD); c.setLineWidth(1)
@@ -586,8 +659,18 @@ def main():
            table([["Price changes", "Profit gain per year", "Units / sales", "Customer basket", "Rule checks"],
                   ["1,329 rises (median +5%), 1 cut", "+$2.18M (cautious $1.97M, optimistic $2.32M)", "-1.6% / +0.3%",
                    "+1.98% (about 3.3 months of inflation)", "0 failures, 954 flags"]], [50, 62, 40, 58, 47]),
+           Spacer(1, 4),
+           table([["Active articles", "Get a recommendation", "Change (rise / cut)", "Held, on shelf", "Not on shelf"],
+                  ["3,812", "2,360 (89% of sales)", "1,330 (1,329 / 1)", "1,030", "1,452"]], [50, 55, 52, 50, 50]),
            Spacer(1, 8),
-           box("<b>Status:</b> <b>Done</b> = built and tested · <b>Draft</b> = built, waiting for business confirmation · "
+           Paragraph("How the profit figures connect", S["h2"]),
+           table([["MILP optimiser", "Trim (90% rule)", "Plan (headline)", "Waves: W1 + Review + Test", "Held articles",
+                   "Rounding", "After rounding", "Cautious"],
+                  ["$2.25M", "-$78K", "$2.18M", "$613K + $1.38M + $130K", "+$59K", "-$5.6K", "$2.17M", "$1.97M"]],
+                 [32, 30, 32, 52, 28, 25, 30, 28]),
+           Spacer(1, 8),
+           box("<b>Status:</b> <b>Done</b> = built and tested · <b>Provisional</b> = built, but depends on the draft goal, the draft "
+               "rules or the IVA answer · <b>Draft</b> = built, waiting for business confirmation · "
                "<b>To do</b> = next, data available · <b>Needs data</b> = waiting for data or a business answer · "
                "<b>At go-live</b> = after the price list is approved · <b>Later</b> = after the SKU lens is accepted."),
            PageBreak(),
@@ -641,7 +724,11 @@ def main():
                   ["FMEA", "List what can go wrong, how bad and how likely, and how to prevent it."],
                   ["Poka-yoke", "Mistake-proofing: rules that make wrong prices impossible."],
                   ["DOE / control group", "A planned test with stores that do not change, to prove the gain."],
-                  ["Kaizen, control plan", "Small regular improvements; who checks what, how often, and what to do."]],
+                  ["Kaizen, control plan", "Small regular improvements; who checks what, how often, and what to do."],
+                  ["Endogeneity / instrumental variable", "Prices that follow demand can bias estimates; an outside driver of price "
+                   "(e.g. supplier cost) gives a fair test, if it does not move with demand itself."],
+                  ["Statistical power", "Whether a test is big and long enough to see the change we expect."],
+                  ["Rollback rule", "A limit agreed in advance: if results cross it, the change is paused or reversed."]],
                  [70, 187], first_bold=True)]
 
     doc.build(st, onFirstPage=on_cover, onLaterPages=on_page)
