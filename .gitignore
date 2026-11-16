@@ -1,0 +1,15 @@
+# Code and method docs only. Data, extracts, outputs and credentials stay out of git.
+*
+!*/
+!.gitignore
+!scripts/*.py
+!analysis/**/*.md
+!dashboard/index.html
+!dashboard/page.html
+!dashboard/dash-local.js
+
+# never commit
+.env
+.venv/
+__pycache__/
+*.bak.*
