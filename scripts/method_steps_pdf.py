@@ -47,10 +47,12 @@ STEPS = [
      "-",
      "SIPOC, process map", "To do"),
     ("Measure today's pricing performance (before picture)",
-     "How often prices change, how fast price follows cost, share of articles below cost or under 5% margin, margin by group, "
-     "price accuracy. Parts already measured (15,712 price steps, 594 articles under 5%); one baseline sheet still to build.",
-     "Descriptive statistics, KPI baseline",
-     "Baseline measurement, current-state value stream", "To do"),
+     "Last 52 weeks, net of IVA: margin 13.4%; 6.8% of sales sold below cost, 19.8% under 5% margin (beverages 28.8% below "
+     "cost, linked to the 14% IVA gap); 6,274 lasting price changes (4,660 up, 1,614 down, median 5.9%); only 47% of 5%+ cost "
+     "rises followed by a price rise within 13 weeks (median 4 weeks, about 66% of the cost passed on); 9.1% of sales in "
+     "markdown weeks. Margin by quarter: 15.2% (Q1 2024) to 11.0% (Q4 2025) to 13.8% (Q3 2026).",
+     "Descriptive statistics, KPI baseline, event analysis",
+     "Baseline measurement, defect rate, current-state value stream", "Done"),
     ("Pricing rules catalogue (20 rules)",
      "Each rule hard (never break) or soft (flag), with owner and data source. 8 items wait for the business. Rule 20 (label "
      "capacity per wave) cannot be checked until the business gives the number, so 19 are checked automatically.",
