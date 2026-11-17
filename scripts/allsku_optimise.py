@@ -9,7 +9,9 @@ F3  Profit: NET of IVA price and unit cost of the last 4 regular-price weeks; GP
     likely / cautious / optimistic sensitivity.
 F4  Cost pass-through scan: cost vs price change over 26 weeks, catch-up needed to get back to the SubGroup margin.
 F5  Overstock and slow movers: weeks of stock > 26 and units falling > 25% -> markdown candidate, no rise.
-G1  Guardrails (demo Max-profit plan): step <= 10%, tested range, unit loss <= 10% class A / 15% others (cautious case
+G1  Guardrails (demo Max-profit plan): rise <= 8% (cut <= 10%), Low-confidence rise <= 5%, at most 60% of a
+    SubGroup's SKUs raised at once, customer basket rise <= 1.8% (sales-weighted, ~3 months of CPI; a penalty on each
+    SKU's sales-weighted rise, set by bisection), tested range, unit loss <= 10% class A / 15% others (cautious case
     for Low confidence), cautious GP of each SubGroup must not fall, no rise after a >= 15% rise in the last 26 weeks,
     no cut on supply risk, never below unit cost, Everyday KVIs held (the demo rule; "KVI unlocked" shown as a scenario),
     not on shelf -> hold, min gain (500k Kz per 13 weeks or 2% of the SKU's GP; loss-makers exempt), smallest move giving
@@ -19,6 +21,7 @@ G2  Optimiser test: coordinate ascent with substitution (demo) vs MILP over the 
 G3  Volume vs GP frontier: unit-loss caps 5 / 10 / 15 / 20% for every SKU.
 G4  Scenarios: likely / cautious / optimistic, cost drift (CPI 0.6% a month), FX +10% on imported costs, KVI unlocked.
 G5  Timing: GP gain of the plan by start week (23 Nov, 30 Nov, 4 Jan, 1 Feb) over the first 13 weeks.
+G6  Limits waterfall: the plan before the step-3 limits, then each limit added in turn (what each one costs).
 
 Usage: python scripts/allsku_optimise.py [--forecast file.csv]   (CSV: SKU_Code, Week_Start, Units; chain level)
 Outputs: clean/allsku/optimal_prices.parquet, clean/allsku/weekly_impact.parquet, analysis/allsku/optimisation.xlsx
@@ -36,6 +39,8 @@ ROOT = Path(__file__).resolve().parents[1]
 CL, OUT = ROOT / "clean" / "allsku", ROOT / "analysis" / "allsku"
 FX = 1050.0
 MAX_STEP, GRID = 0.10, np.round(np.arange(-0.15, 0.1501, 0.01), 2)
+MAX_RISE, LOW_RISE, SUB_RISE_SHARE, BASKET_MAX = 0.08, 0.05, 0.60, 1.75   # basket target 1.75 leaves room for rounding (limit 1.8)
+LAMBDA = 0.0                                                              # basket penalty, set in main()
 VOL_CAP = {"A": 0.10, "B": 0.15, "C": 0.15}
 MIN_GAIN_KZ_13W, MIN_GAIN_PCT, SMALLEST_MOVE = 500_000, 2.0, 0.90
 REPRICED_PCT, SUPPLY_RISK, MAX_DIV, STOCKOUT_RISK = 15, 0.70, 0.60, 0.20
@@ -129,10 +134,10 @@ def allowed_moves(d, kvi_hold=True, vol_cap=None):
         if reason:
             out[code], why[code] = [0.0], reason
             continue
-        up = min(MAX_STEP, r.Range_Up if r.Range_Up == r.Range_Up else 0.05)
+        up = min(MAX_RISE, r.Range_Up if r.Range_Up == r.Range_Up else 0.05)
         dn = min(MAX_STEP, r.Range_Down if r.Range_Down == r.Range_Down else 0.05)
         if r.Confidence == "Low":
-            up, dn = min(up, 0.10), min(dn, 0.10)
+            up, dn = min(up, LOW_RISE), min(dn, 0.10)
         g = [x for x in GRID if -dn - 1e-9 <= x <= up + 1e-9]
         if r.Supply_Risk or r.Overstock:
             g = [x for x in g if x >= 0] if r.Supply_Risk else g
@@ -145,7 +150,8 @@ def allowed_moves(d, kvi_hold=True, vol_cap=None):
         if r.Confidence == "Low" and r.ABC == "C":
             target = sub_margin.get(r.SubGroup, 0.12)
             need = r.C / (1 - target) / r.P - 1
-            cu = float(np.clip(np.round(need, 2), 0, up)) if (r["Cost_chg_26w_%"] > r["Price_chg_26w_%"] + 2 and need > 0.01) else 0.0
+            rise_ok = any(x > 0 for x in g)                                # rise bans above (recent rise, overstock) still hold
+            cu = float(np.clip(np.round(need, 2), 0, up)) if (rise_ok and r["Cost_chg_26w_%"] > r["Price_chg_26w_%"] + 2 and need > 0.01) else 0.0
             g = sorted({0.0, cu})
             why[code] = "tail: cost pass-through rule"
         out[code] = g if g else [0.0]
@@ -166,6 +172,7 @@ class Group:
         rev = self.B * self.P
         self.share = rev / rev.sum() if rev.sum() > 0 else np.zeros(len(rev))
         self.GP0 = self.B * (self.P - self.C)
+        self.W = d.Revenue_USD.fillna(0).to_numpy(float) * FX               # basket weight (sales, as in the rules check)
 
     def units(self, dd, case="L"):
         eR, eC = {"L": (self.eR, self.eC), "S": (self.eRs, self.eCs), "O": (self.eRo, self.eCo)}[case]
@@ -184,7 +191,13 @@ class Group:
         return u * (self.P * (1 + dd) - self.C), u
 
 
+def rise_limit(m):
+    return m if SUB_RISE_SHARE >= 1 else max(1, int(SUB_RISE_SHARE * m))
+
+
 def feasible(G, dd, caps, low):
+    if (dd > 0).sum() > rise_limit(len(dd)):
+        return False
     u_l = G.units(dd, "L")
     loss = u_l / np.maximum(G.B, 1e-9) - 1
     if np.any((dd > 0) & (loss < -caps - 1e-9)):
@@ -209,7 +222,7 @@ def coord_ascent(G, allowed, caps, low, rounds=6):
                 t = dd.copy(); t[i] = x
                 if not feasible(G, t, caps, low):
                     continue
-                v = G.gp(t)[0].sum()
+                v = G.gp(t)[0].sum() - LAMBDA * (G.W * t).sum()
                 if best is None or v > best + 1e-6:
                     best, bd = v, x
             if bd != dd[i]:
@@ -233,11 +246,13 @@ def solve_milp(G, allowed, caps, low):
     n, m = len(var), len(G.codes)
     if n == 0:
         return np.zeros(m)
-    c = -np.array([v[2] for v in var])
+    c = -np.array([v[2] - LAMBDA * G.W[v[0]] * v[1] for v in var])
     A1 = np.zeros((m, n))
     for j, v in enumerate(var):
         A1[v[0], j] = 1
     cons = [LinearConstraint(A1, 1, 1), LinearConstraint(np.array([[v[3] for v in var]]), 0, np.inf)]
+    if rise_limit(m) < m:                                                 # at most 60% of the SubGroup raised
+        cons.append(LinearConstraint(np.array([[1.0 if v[1] > 0 else 0.0 for v in var]]), 0, rise_limit(m)))
     # price order: pairs within 10% of each other keep their order
     P = G.P
     order = np.argsort(P)
@@ -336,6 +351,51 @@ def evaluate(d, dd, bl):
     return res, w[keep].rename(columns={"Units_now_w": "Units_now"})
 
 
+def basket(d, dd):
+    w = d.Revenue_USD.fillna(0)
+    return float((dd.reindex(d.index).fillna(0) * w).sum() / w.sum() * 100)
+
+
+def plan(d, allowed, caps, method="milp"):
+    x, _ = run_plan(d, allowed, caps, method)
+    return finalise(d, x, allowed, caps)
+
+
+def set_basket_penalty(d, allowed, caps):
+    """smallest penalty that keeps the finalised plan's basket rise within BASKET_MAX (bisection)"""
+    global LAMBDA
+    LAMBDA = 0.0
+    b = basket(d, plan(d, allowed, caps))
+    if b <= BASKET_MAX:
+        return 0.0, b
+    lo, hi = 0.0, 0.5
+    for _ in range(8):
+        LAMBDA = (lo + hi) / 2
+        b = basket(d, plan(d, allowed, caps))
+        lo, hi = (LAMBDA, hi) if b > BASKET_MAX else (lo, LAMBDA)
+    LAMBDA = hi
+    return hi, basket(d, plan(d, allowed, caps))
+
+
+def waterfall(d, caps, bl, lam):
+    """G6: plan before the step-3 limits, then each limit added in turn"""
+    global MAX_RISE, LOW_RISE, SUB_RISE_SHARE, LAMBDA
+    final = (MAX_RISE, LOW_RISE, SUB_RISE_SHARE, LAMBDA)
+    steps = [("Before the step-3 limits (rise <= 10%, Low confidence <= 10%)", 0.10, 0.10, 1.0, 0.0),
+             ("+ biggest rise 8%", 0.08, 0.10, 1.0, 0.0),
+             ("+ Low-confidence rise <= 5%", 0.08, 0.05, 1.0, 0.0),
+             ("+ at most 60% of a SubGroup raised", 0.08, 0.05, 0.60, 0.0),
+             (f"+ basket rise <= 1.8% (penalty {lam:.3f})", 0.08, 0.05, 0.60, lam)]
+    rows = []
+    for name, MAX_RISE, LOW_RISE, SUB_RISE_SHARE, LAMBDA in steps:
+        al, _ = allowed_moves(d)
+        x = plan(d, al, caps)
+        rows.append({"Step": name, **totals(evaluate(d, x, bl)[0]), "Basket_%": basket(d, x),
+                     "Rises_7pct_plus": int((x >= 0.07 - 1e-9).sum())})
+    MAX_RISE, LOW_RISE, SUB_RISE_SHARE, LAMBDA = final
+    return pd.DataFrame(rows)
+
+
 def totals(res):
     t = res.sum()
     return {"GP_now_$": t.GP_now / FX, "GP_gain_likely_$": (t.GP_L - t.GP_now) / FX, "GP_gain_cautious_$": (t.GP_S - t.GP_now) / FX,
@@ -352,6 +412,8 @@ def main():
     d, bl = inputs(a.forecast)
     caps = {c: (0.15 if c in SCARCITY else VOL_CAP.get(r.ABC, 0.15)) for c, r in d.iterrows()}
     allowed, why = allowed_moves(d)
+    lam, b_lam = set_basket_penalty(d, allowed, caps)
+    print(f"basket penalty {lam:.4f} -> basket {b_lam:.2f}%", flush=True)
 
     # ---- G2 optimiser test
     dd_c, sec_c = run_plan(d, allowed, caps, "coord")
@@ -410,6 +472,10 @@ def main():
                     "Units_13w_%": (ww.Units_new_L.sum() / ww.Units_now.sum() - 1) * 100})
     tim = pd.DataFrame(tim)
 
+    # ---- G6 limits waterfall
+    wf = waterfall(d, caps, bl, lam)
+    print(wf.round(2).to_string(index=False), flush=True)
+
     # ---- outputs
     out = d.join(res).join(pd.Series(why, name="Hold_Reason"))
     out["Change_%"] = out.Change.fillna(0) * 100
@@ -438,6 +504,7 @@ def main():
         front.round(1).to_excel(xw, sheet_name="G3 frontier", index=False)
         scen.round(1).to_excel(xw, sheet_name="G4 scenarios", index=False)
         tim.round(1).to_excel(xw, sheet_name="G5 timing", index=False)
+        wf.round(2).to_excel(xw, sheet_name="G6 limits waterfall", index=False)
         out[out.Overstock.fillna(False)].reset_index()[["Code", "Name", "Weeks_Cover", "Units_Trend_%", "Margin_now_%"]].to_excel(xw, sheet_name="F5 overstock", index=False)
         out[(out["Cost_chg_26w_%"] - out["Price_chg_26w_%"] > 3) & out.in_scope].reset_index()[[
             "Code", "Name", "SubGroup", "Cost_chg_26w_%", "Price_chg_26w_%", "Margin_now_%", "Catch_up_needed_%", "Change_%"]].round(1).to_excel(xw, sheet_name="F4 pass-through", index=False)
