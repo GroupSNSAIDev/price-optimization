@@ -2,8 +2,10 @@
 
 H1  Shelf price: latest price record, store mode, incl. IVA per sales pack; rounded to Fresmart endings (...9.99 below
     10,000 Kz, ...99.99 above) on the same side of today's price; guardrails re-checked after rounding (one price point
-    back when the unit-loss cap or cost is broken); rounding impact on GP reported; key thresholds (1,000 / 5,000 /
-    10,000 / 50,000 / 100,000 Kz) flagged when crossed, with the just-below price and the share of the gain it keeps.
+    back when the unit-loss cap or cost is broken, or when rounding takes a rise more than 0.5 points over the rise
+    limit: 8%, Low confidence 5%, unless no ending lies between today's price and the limit); rounding impact on GP
+    reported; key thresholds (1,000 / 5,000 / 10,000 / 50,000 / 100,000 Kz) flagged when crossed, with the just-below
+    price and the share of the gain it keeps.
 H2  Store rules: each store keeps its own tier (the chain % change is applied to its own price); HRCA left out;
     wholesale (HDDS, HDS2-4) get no rises on staples; stores > 12% off the chain price are listed for pricing.
 H3  Business rules check against the A2 catalogue (R1-R20; ladders / price lines need pack data -> short description phase).
@@ -30,6 +32,7 @@ import numpy as np
 import pandas as pd
 
 import pilot_recommend as R
+from allsku_optimise import LOW_RISE, MAX_RISE
 
 ROOT = Path(__file__).resolve().parents[1]
 CL, OUT = ROOT / "clean" / "allsku", ROOT / "analysis" / "allsku"
@@ -194,6 +197,13 @@ def main():
         p = R.round_shelf(cur, dpc)
         d = p / cur - 1
         cap = 0.15 if r.ABC != "A" else 0.10
+        rise_cap = (LOW_RISE if r.Confidence == "Low" else MAX_RISE) + 0.005
+        while d > rise_cap:                                                # rounding must not break the rise limit
+            lower = [x for x in R.price_points(p) if cur < x < p]
+            if not lower:
+                break
+            p = max(lower)
+            d = p / cur - 1
         while d > 0 and ((1 + d) ** r.Rise - 1 < -cap - 1e-9):
             lower = [x for x in R.price_points(p) if cur < x < p]
             p = max(lower) if lower else cur
@@ -202,7 +212,8 @@ def main():
             higher = [x for x in R.price_points(p) if p < x < cur]
             p = min(higher) if higher else cur
             d = p / cur - 1
-        new.append(p); note.append("stepped back after rounding" if abs(d * 100 - dpc) > 2.5 else "")
+        new.append(p)
+        note.append("no ending under the limit" if d > rise_cap else "stepped back after rounding" if abs(d * 100 - dpc) > 2.5 else "")
     op["New_Shelf_Price_KZ"] = new
     op["Rounding_Note"] = note
     op["Final_Change_%"] = (op.New_Shelf_Price_KZ / op.Shelf_Price_KZ - 1) * 100
