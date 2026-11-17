@@ -9,6 +9,7 @@
 !dashboard/studio/index.html
 !dashboard/studio/studio.css
 !dashboard/studio/studio.js
+!dashboard/studio/fresmart_logo.png
 
 # never commit
 .env

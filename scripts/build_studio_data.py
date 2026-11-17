@@ -7,6 +7,8 @@ Writes dashboard/studio/data/:
   weekly.json   chain totals by week (now / likely / cautious / optimistic units and GP) and by wave
   weekly_sku.json  week-by-week units now vs new for every changed SKU
   flags.json    rule FLAGs / FAILs per SKU
+  history/gNN.json  weekly price history per SKU (one file per MainGroup): regular and selling price, cost (with IVA, per
+                sales pack) and units, Jan 2024 on
 Money in US dollars at 1,050 Kz, gross profit after IVA.
 
 Run after the pipeline, allsku_checks.py and allsku_event_check.py:  python scripts/build_studio_data.py
@@ -36,7 +38,7 @@ def skus():
     so = xl("stockouts.xlsx", "By SKU", dtype={"Code": str}).set_index("Code")
     usd = lambda c: pl[c] / FX
     d = pd.DataFrame({
-        "code": pl.Code, "name": pl.Name, "group": pl.MainGroup, "sub": pl.SubGroup, "brand": pl.Brand, "segment": pl.Segment,
+        "code": pl.Code, "name": pl.Name, "group": pl.MainGroup, "sub": pl.SubGroup, "sd": pl.ShortDesc.fillna("Other"), "brand": pl.Brand, "segment": pl.Segment,
         "insight": pl.Insight, "abc": pl.ABC, "shelf": pl.in_scope.fillna(False).astype(bool), "conf": pl.Confidence,
         "wave": pl.Wave, "price": pl.Shelf_Price_KZ, "new_price": pl.New_Shelf_Price_KZ, "chg": pl["Final_Change_%"].fillna(0),
         "opt": pl["Change_%"].fillna(0), "p_net": pl.P, "cost": pl.C, "units": pl.Base_52w, "e": pl.Elasticity, "e_rise": pl.Rise,
@@ -72,6 +74,29 @@ def weekly():
     return ({"weeks": t.Week.tolist(), "chain": rec(t.drop(columns="Week")),
              "by_wave": {k: g.gain.round(0).tolist() for k, g in bw.groupby("Wave")}},
             {"weeks": sorted(ws.Week.dt.strftime("%Y-%m-%d").unique().tolist()), "skus": per})
+
+
+def history():
+    """weekly price history per SKU, Jan 2024 on, split by MainGroup: shelf-equivalent regular and selling price, cost, units.
+    Chain prices are per base unit; they are scaled to the sales pack with today's shelf price / the last 4 weeks' regular price."""
+    pl = pd.read_parquet(CL / "price_list.parquet", columns=["Code", "MainGroup", "Shelf_Price_KZ"]).set_index("Code")
+    iva = pd.read_parquet(CL / "iva_by_sku.parquet").set_index("Code").IVA_Pct
+    cw = pd.read_parquet(CL / "chain_weekly.parquet", columns=["Code", "Week", "Units", "Price_KZ", "Regular_Price_KZ", "Unit_Cost_KZ"])
+    cw = cw[cw.Code.isin(pl.index)].sort_values(["Code", "Week"])
+    weeks = pd.date_range(cw.Week.min(), cw.Week.max(), freq="7D")
+    out = {}
+    for code, g in cw.groupby("Code"):
+        g = g.set_index("Week").reindex(weeks)
+        last = g.Regular_Price_KZ.dropna().tail(4).median()
+        shelf = pl.at[code, "Shelf_Price_KZ"]
+        k = shelf / last if shelf == shelf and shelf > 0 and last == last and last > 0 else float("nan")
+        if k != k:
+            continue
+        cost_pack = g.Unit_Cost_KZ * k * (1 + iva.get(code, 0) / 100)      # cost on the same footing as the shelf price (with IVA)
+        rnd = lambda x: [None if v != v else round(float(v), 2) for v in x]
+        out.setdefault(pl.at[code, "MainGroup"], {})[code] = {"reg": rnd(g.Regular_Price_KZ * k), "sell": rnd(g.Price_KZ * k),
+                                                               "cost": rnd(cost_pack), "units": rnd(g.Units.fillna(0))}
+    return [d.strftime("%Y-%m-%d") for d in weeks], out
 
 
 def flags():
@@ -151,7 +176,18 @@ def meta():
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     wk, wk_sku = weekly()
-    for name, obj in [("meta", meta()), ("skus", skus()), ("weekly", wk), ("weekly_sku", wk_sku), ("flags", flags())]:
+    hw, hist = history()
+    hdir = OUT / "history"
+    hdir.mkdir(exist_ok=True)
+    groups = {}
+    for i, (grp, d) in enumerate(sorted(hist.items())):
+        f = f"g{i:02d}.json"
+        (hdir / f).write_text(json.dumps({"weeks": hw, "skus": d}, separators=(",", ":")), encoding="utf-8")
+        groups[grp] = f
+    print(f"history          {len(groups)} group files, {sum(len(d) for d in hist.values())} SKUs")
+    m = meta()
+    m["history_files"] = groups
+    for name, obj in [("meta", m), ("skus", skus()), ("weekly", wk), ("weekly_sku", wk_sku), ("flags", flags())]:
         p = OUT / f"{name}.json"
         p.write_text(json.dumps(obj, separators=(",", ":"), default=str), encoding="utf-8")
         print(f"{p.name:16s} {p.stat().st_size / 1024:8.0f} KB")

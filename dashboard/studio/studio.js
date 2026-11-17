@@ -28,7 +28,7 @@ const fmt = {
 };
 const pill = (text, tone = '') => el('span', { class: 'pill ' + tone }, text);
 const chgPill = (v) => v > 0 ? pill(fmt.pct(v), 'plum') : v < 0 ? pill(fmt.pct(v), 'warn') : pill('Hold');
-const WAVE_COLOR = { 'Wave 1': 'var(--plum)', 'Review then Wave 1': 'var(--gold-400)', 'Test': 'var(--c5)', 'Hold': 'var(--plum-200)' };
+const WAVE_COLOR = { 'Wave 1': 'var(--plum)', 'Review then Wave 1': 'var(--gold-400)', 'Test': 'var(--navy)', 'Hold': 'var(--plum-200)' };
 const tip = $('#tip');
 function showTip(ev, title, rows) {
   tip.replaceChildren(el('div', { class: 'th' }, title), ...rows.map(([k, v]) => el('div', { class: 'tr' }, el('span', {}, k), el('span', {}, v))));
@@ -49,6 +49,10 @@ const ICON = {
   box: '<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/>',
   flask: '<path d="M9 3h6M10 3v6L4.5 19a1.5 1.5 0 0 0 1.3 2h12.4a1.5 1.5 0 0 0 1.3-2L14 9V3"/><path d="M7 15h10"/>',
   grid: '<circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="7" r="3.5"/><circle cx="8" cy="17" r="4"/><circle cx="18" cy="18" r="2"/>',
+  coin: '<circle cx="12" cy="12" r="9"/><path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .8-3 2s1.3 1.7 3 2 3 .8 3 2-1.3 2-3 2c-1.4 0-2.6-.6-3-1.6M12 6v2M12 16v2"/>',
+  curve: '<path d="M3 3v18h18"/><path d="M6 6c3 0 5 2 7 6s4 6 7 6"/>',
+  upload: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>',
+  promo: '<path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1z"/><path d="M15 9a4 4 0 0 1 0 6M18 6a8 8 0 0 1 0 12"/>',
   book: '<path d="M4 4h6a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4z"/><path d="M20 4h-6a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h6z"/>',
 };
 const svgIcon = (name) => { const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('aria-hidden', 'true'); s.innerHTML = ICON[name]; return s; };
@@ -56,8 +60,9 @@ const svgIcon = (name) => { const s = document.createElementNS('http://www.w3.or
 // ---------------------------------------------------------------- state
 let M, SKUS, BY_CODE, WEEKLY, FLAGS, WSKU = null;
 const PAGES = [
-  ['Plan', [['overview', 'Overview', 'overview'], ['prices', 'Price list', 'tag'], ['simulator', 'Simulator', 'sliders'], ['scenarios', 'Scenarios', 'layers']]],
-  ['Rollout', [['rollout', 'Rollout & test', 'flag'], ['monitoring', 'Monitoring', 'activity']]],
+  ['Pricing', [['overview', 'Overview', 'overview'], ['today', 'Today’s price', 'coin'], ['elasticity', 'Price elasticity', 'curve'], ['forecast', 'Forecast & target', 'upload'],
+    ['promos', 'Promotions', 'promo'], ['prices', 'Recommended price', 'tag'], ['simulator', 'Simulator', 'sliders'], ['scenarios', 'Scenarios', 'layers']]],
+  ['Go-live', [['rollout', 'Rollout & test', 'flag'], ['monitoring', 'Monitoring', 'activity']]],
   ['Control', [['rules', 'Business rules', 'shield'], ['stockouts', 'Stock-outs', 'box'], ['health', 'Model health', 'flask']]],
   ['Reference', [['portfolio', 'Portfolio', 'grid'], ['method', 'Method', 'book']]],
 ];
@@ -170,7 +175,7 @@ function simulate(s, d) {
 // ---------------------------------------------------------------- drawer
 function openSku(code) {
   const s = BY_CODE.get(code); if (!s) return;
-  $('#dr-code').textContent = `${s.code} · ${s.group} · ${s.sub}`;
+  $('#dr-code').replaceChildren(pathEl(s, s.code));
   $('#dr-name').textContent = s.name;
   $('#dr-tags').replaceChildren(...[chgPill(s.chg), pill(s.wave, s.wave === 'Hold' ? '' : 'gold'), pill(s.conf + ' confidence', s.conf === 'High' ? 'ok' : s.conf === 'Low' ? 'warn' : ''),
     s.kvi ? pill('Everyday KVI', 'plum') : null, s.shelf ? null : pill('Not on shelf', 'bad'), s.supply_risk ? pill('Supply risk', 'bad') : null].filter(Boolean));
@@ -275,40 +280,363 @@ V.overview = () => {
       card('Where the gain comes from', 'Top product groups, 52-week gain', barList(groups.map((g) => ({ label: g.MainGroup, value: g.GP_gain_52w, text: fmt.usd(g.GP_gain_52w), title: `${g.Raise} rises, average ${fmt.pct(g.Avg_change)}` }))))),
     card('Rollout waves', 'Wave 1 goes first; review-then-Wave-1 articles need a pricing check; Test articles run in the store test first', waves),
     card('Biggest single gains', 'Click an article for its detail', dataTable({ rows: top, onRow: (r) => openSku(r.code), cols: [
-      { h: 'Article', f: (r) => el('div', {}, el('div', { class: 'name' }, r.name), el('div', { class: 'muted' }, `${r.code} · ${r.group}`)) },
+      { h: 'Article', f: artCell },
       { h: 'Now', num: 1, f: (r) => fmt.kz(r.price) }, { h: 'New', num: 1, f: (r) => fmt.kz(r.new_price) }, { h: 'Change', num: 1, f: (r) => chgPill(r.chg) },
       { h: 'Units', num: 1, f: (r) => fmt.pct(r.units_chg) }, { h: 'Gain', num: 1, f: (r) => el('b', {}, fmt.usdSigned(r.gain)) }, { h: 'Wave', f: (r) => r.wave }] }))];
 };
 
-const PL = { q: '', wave: '', group: '', conf: '', dir: 'changed' };
+// ---------------------------------------------------------------- article hierarchy: Main group › Sub group › Short description › article
+const pathEl = (s, extra) => el('div', { class: 'path' }, el('span', {}, s.group), el('span', {}, s.sub), el('span', {}, s.sd), extra ? el('span', {}, extra) : null);
+const artCell = (s) => el('div', { class: 'art' }, el('div', { class: 'name' }, s.name), pathEl(s, s.code));
+const artCellRaw = (code, name) => { const s = BY_CODE.get(String(code)); return s ? artCell(s) : el('div', { class: 'art' }, el('div', { class: 'name' }, name), el('div', { class: 'path' }, String(code))); };
+const bandOf = (e) => e == null ? 'Not measured' : e <= -2 ? 'Highly elastic' : e <= -1 ? 'Elastic' : e <= -0.5 ? 'Moderate' : 'Inelastic';
+const BAND_TONE = { 'Highly elastic': 'bad', Elastic: 'warn', Moderate: 'plum', Inelastic: 'ok', 'Not measured': '' };
+const uniq = (a) => [...new Set(a)].filter((x) => x != null).sort();
+const store = { get(k, d) { try { const v = localStorage.getItem('fps-' + k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('fps-' + k, JSON.stringify(v)); } catch (e) { /* storage blocked */ } } };
+
+/* selection shared by Today's price and Price elasticity, so the article carries over */
+const SEL = store.get('sel', { group: '', sub: '', sd: '', code: '' });
+const inSel = (s, st = SEL) => (!st.group || s.group === st.group) && (!st.sub || s.sub === st.sub) && (!st.sd || s.sd === st.sd);
+function hierFilter(st, onChange, { article = false, pool = SKUS } = {}) {
+  const sel = (label, key, opts, all) => el('label', {}, label, el('select', { class: 'sel', onchange: (e) => { st[key] = e.target.value;
+      const order = ['group', 'sub', 'sd', 'code']; order.slice(order.indexOf(key) + 1).forEach((k) => { st[k] = ''; }); store.set('sel', SEL); onChange(); } },
+    el('option', { value: '' }, all), opts.map((o) => el('option', { value: o[0] ?? o, selected: (o[0] ?? o) === st[key] || null }, o[1] ?? o))));
+  const g = pool, gs = uniq(g.map((s) => s.group));
+  const subs = uniq(g.filter((s) => !st.group || s.group === st.group).map((s) => s.sub));
+  const sds = uniq(g.filter((s) => (!st.group || s.group === st.group) && (!st.sub || s.sub === st.sub)).map((s) => s.sd));
+  const kids = [sel('Main group', 'group', gs, 'All main groups'), sel('Sub group', 'sub', subs, 'All sub groups'), sel('Short description', 'sd', sds, 'All short descriptions')];
+  if (article) {
+    const arts = g.filter((s) => inSel(s, st)).sort((a, b) => b.rev - a.rev).slice(0, 600);
+    kids.push(sel('Article', 'code', arts.map((s) => [s.code, `${s.name} (${s.code})`]), `All articles (${fmt.n(g.filter((s) => inSel(s, st)).length)})`));
+  }
+  return el('div', { class: 'hier' }, kids);
+}
+
+const HIST = {};
+function loadHist(group) {
+  const f = M.history_files[group]; if (!f) return Promise.resolve(null);
+  return HIST[f] ? Promise.resolve(HIST[f]) : fetch('data/history/' + f).then((r) => r.json()).then((j) => { HIST[f] = j; return j; });
+}
+
+const articleHead = (s, ...tags) => el('div', { class: 'art-head' }, pathEl(s, s.code), el('h2', {}, s.name), el('div', { class: 'chips' }, tags.filter(Boolean)));
+
+// ---------------------------------------------------------------- 2. Today's price
+V.today = () => {
+  const box = el('div', { style: 'display:grid;gap:18px' });
+  const filter = el('section', { class: 'card' });
+  function draw() {
+    filter.replaceChildren(el('div', { class: 'card-head' }, el('div', {}, el('h2', {}, 'Choose articles'), el('p', { class: 'sub' }, 'Main group, then sub group, then short description, then the article'))),
+      hierFilter(SEL, draw, { article: true }));
+    box.replaceChildren(SEL.code && BY_CODE.get(SEL.code) ? todayArticle(BY_CODE.get(SEL.code)) : todaySelection());
+  }
+  draw();
+  return [head('Step 2', 'Today’s price', 'Where each article stands today: shelf price, cost, margin after IVA, sales and its price history.'), filter, box];
+};
+function todaySelection() {
+  const rows = SKUS.filter((s) => inSel(s));
+  const rev = d3.sum(rows, (s) => s.rev), gp = d3.sum(rows, (s) => s.rev * (s.m_now || 0) / 100);
+  const below = rows.filter((s) => s.m_now != null && s.m_now < 0).length;
+  const table = dataTable({ rows, sort: { k: 'rev', dir: -1 }, pageSize: 100, onRow: (r) => { SEL.code = r.code; store.set('sel', SEL); render(); }, cols: [
+    { h: 'Article', key: 'name', f: artCell }, { h: 'Shelf price today', key: 'price', num: 1, f: (r) => fmt.kz(r.price) },
+    { h: 'Margin after IVA', key: 'm_now', num: 1, f: (r) => r.m_now == null ? '–' : el('span', { class: r.m_now < 0 ? 'down' : '' }, fmt.pct(r.m_now, 1, false)) },
+    { h: 'Revenue, 52 wks', key: 'rev', num: 1, f: (r) => fmt.usd(r.rev) }, { h: 'Stores', key: 'stores', num: 1, f: (r) => fmt.n(r.stores) },
+    { h: 'Price moved, 26 wks', key: 'repriced', num: 1, f: (r) => r.repriced == null ? '–' : fmt.pct(r.repriced) },
+    { h: 'Status', key: 'shelf', f: (r) => r.shelf ? pill('On shelf', 'ok') : pill('Not on shelf', 'bad') }] });
+  return el('div', { style: 'display:grid;gap:18px' },
+    el('div', { class: 'kpis' }, kpi('Articles', fmt.n(rows.length), `${fmt.n(rows.filter((s) => s.shelf).length)} on the shelf`), kpi('Revenue, 52 weeks', fmt.usd(rev), 'with IVA, as recorded'),
+      kpi('Margin after IVA', rev ? fmt.pct(gp / rev * 100, 1, false) : '–', 'at today’s price and cost, sales-weighted'), kpi('Sold below cost', fmt.n(below), 'articles in this selection', below ? 'down' : '')),
+    card('Articles today', 'Click an article to see its price history', table));
+}
+function todayArticle(s) {
+  const wrap = el('div', { style: 'display:grid;gap:18px' });
+  const priceBox = el('div', { class: 'chart' }), unitBox = el('div', { class: 'chart' });
+  const sib = SKUS.filter((x) => x.sd === s.sd && x.sub === s.sub && x.code !== s.code).sort((a, b) => b.rev - a.rev).slice(0, 15);
+  wrap.append(el('section', { class: 'card' }, el('div', { class: 'card-head' }, articleHead(s, s.shelf ? pill('On shelf', 'ok') : pill('Not on shelf', 'bad'), s.kvi ? pill('Everyday KVI', 'plum') : null, pill(s.segment)),
+      el('div', { class: 'toolbar' }, el('button', { class: 'btn', onclick: () => { SEL.code = ''; store.set('sel', SEL); render(); } }, '← All articles'), el('button', { class: 'btn', onclick: () => go('elasticity') }, 'Price elasticity →'), el('button', { class: 'btn primary', onclick: () => openSku(s.code) }, 'Recommendation')))),
+    el('div', { class: 'kpis' }, kpi('Shelf price today', fmt.kz(s.price), `${fmt.n(s.stores)} stores priced`), kpi('Margin after IVA', fmt.pct(s.m_now, 1, false), 'sales minus IVA minus cost', s.m_now < 0 ? 'down' : ''),
+      kpi('Revenue, 52 weeks', fmt.usd(s.rev), `gross profit ${fmt.usd(s.gp_now)}`), kpi('Units, next 52 weeks', fmt.n(s.units), 'forecast at today’s price'),
+      kpi('Price moved, 26 weeks', s.repriced == null ? '–' : fmt.pct(s.repriced), 'regular price, last 4 weeks vs 14-26 weeks ago'), kpi('Stock-out weeks', s.stockout == null ? '–' : fmt.pct(s.stockout, 1, false), 'of store-weeks, last 13')),
+    card('Price history', 'Regular shelf price, the average price customers paid, and the cost (with IVA), per sales pack; Jan 2024 to today', priceBox,
+      el('div', { class: 'legend' }, el('span', {}, el('i', { style: 'background:var(--plum)' }), 'Regular shelf price'), el('span', {}, el('i', { style: 'background:var(--navy)' }), 'Price paid (after markdowns)'), el('span', {}, el('i', { style: 'background:var(--gold-400)' }), 'Cost with IVA'))),
+    card('Units sold per week', 'Chain total, all stores', unitBox),
+    sib.length ? card('Same short description', `Other ${s.sd} articles in ${s.sub}`, dataTable({ rows: sib, onRow: (r) => { SEL.code = r.code; store.set('sel', SEL); render(); }, cols: [
+      { h: 'Article', f: artCell }, { h: 'Shelf price', num: 1, f: (r) => fmt.kz(r.price) }, { h: 'Margin', num: 1, f: (r) => fmt.pct(r.m_now, 1, false) }, { h: 'Revenue', num: 1, f: (r) => fmt.usd(r.rev) },
+      { h: 'Recommended', num: 1, f: (r) => chgPill(r.chg) }] })) : null);
+  loadHist(s.group).then((h) => {
+    const d = h && h.skus[s.code];
+    if (!d) { priceBox.append(el('p', { class: 'empty' }, 'No price history for this article.')); return; }
+    const dates = h.weeks.map((w) => new Date(w));
+    lineChart(priceBox, { dates, h: 300, yfmt: (v) => fmt.n(v), series: [{ name: 'Regular shelf price', values: d.reg, color: 'var(--plum)', width: 2.4 },
+      { name: 'Price paid', values: d.sell, color: 'var(--navy)', width: 1.4 }, { name: 'Cost with IVA', values: d.cost, color: 'var(--gold-400)', width: 1.6, dash: '4 3' }] });
+    lineChart(unitBox, { dates, h: 200, yfmt: (v) => fmt.n(v), series: [{ name: 'Units', values: d.units, color: 'var(--plum-400)', width: 1.6 }] });
+  });
+  return wrap;
+}
+
+// ---------------------------------------------------------------- 3. Price elasticity
+V.elasticity = () => {
+  const box = el('div', { style: 'display:grid;gap:18px' }); const filter = el('section', { class: 'card' });
+  function draw() {
+    filter.replaceChildren(el('div', { class: 'card-head' }, el('div', {}, el('h2', {}, 'Choose articles'), el('p', { class: 'sub' }, 'Main group, then sub group, then short description, then the article'))),
+      hierFilter(SEL, draw, { article: true }));
+    box.replaceChildren(SEL.code && BY_CODE.get(SEL.code) ? elasArticle(BY_CODE.get(SEL.code)) : elasSelection());
+  }
+  draw();
+  return [head('Step 3', 'Price elasticity', 'How strongly customers react to a price change for each article: what it means, how sure we are, and where the evidence ends.'),
+    el('div', { class: 'explain' }, el('b', {}, 'What the number means. '), 'Price elasticity is the % change in units for a 1% change in price. At ', el('b', {}, '−1.0'),
+      ', a 10% rise loses about 10% of units. At ', el('b', {}, '−0.3'), ' customers barely react (a rise is safe for profit); at ', el('b', {}, '−2.5'),
+      ' they react strongly (a rise loses profit, a cut may win it). Rises and cuts are measured apart, because customers often react more to one than the other.'), filter, box];
+};
+function elasSelection() {
+  const rows = SKUS.filter((s) => inSel(s) && s.e != null);
+  const bands = d3.rollups(rows, (v) => ({ n: v.length, rev: d3.sum(v, (s) => s.rev) }), (s) => bandOf(s.e)); const tot = d3.sum(rows, (s) => s.rev) || 1;
+  const order = ['Highly elastic', 'Elastic', 'Moderate', 'Inelastic'];
+  const dist = el('div', { class: 'chart' });
+  later(() => { // strip chart: every article's rise elasticity, sized by revenue
+    dist.replaceChildren(); const h = 150; const { w } = measure(dist, h); const m = { t: 10, r: 14, b: 30, l: 14 };
+    const x = d3.scaleLinear().domain([-5, 0]).range([m.l, w - m.r]); const r = d3.scaleSqrt().domain([0, d3.max(rows, (s) => s.rev) || 1]).range([2, 14]);
+    const svg = d3.select(dist).append('svg').attr('width', w).attr('height', h).attr('role', 'img').attr('aria-label', 'Price elasticity of each article');
+    [-2, -1, -0.5].forEach((v) => svg.append('line').attr('x1', x(v)).attr('x2', x(v)).attr('y1', m.t).attr('y2', h - m.b).attr('stroke', 'var(--line)').attr('stroke-dasharray', '3 3'));
+    svg.append('g').attr('class', 'ax').attr('transform', `translate(0,${h - m.b})`).call(d3.axisBottom(x).ticks(10).tickSizeOuter(0));
+    const rnd = d3.randomLcg(7);
+    svg.append('g').selectAll('circle').data(rows).join('circle').attr('cx', (s) => x(Math.max(-5, s.e_rise))).attr('cy', () => m.t + 12 + rnd() * (h - m.t - m.b - 24)).attr('r', (s) => r(s.rev))
+      .attr('fill', 'var(--plum-400)').attr('fill-opacity', .45).attr('stroke', 'var(--plum)').attr('stroke-opacity', .5).style('cursor', 'pointer')
+      .on('mousemove', (ev, s) => showTip(ev, s.name, [['Path', `${s.sub} › ${s.sd}`], ['Rise elasticity', s.e_rise.toFixed(2)], ['Cut elasticity', s.e_cut.toFixed(2)], ['Revenue', fmt.usd(s.rev)]]))
+      .on('mouseleave', hideTip).on('click', (ev, s) => { SEL.code = s.code; store.set('sel', SEL); render(); });
+  });
+  return el('div', { style: 'display:grid;gap:18px' },
+    el('div', { class: 'kpis' }, order.map((b) => { const x = bands.find((y) => y[0] === b); return kpi(b, x ? fmt.n(x[1].n) : '0', x ? `${(x[1].rev / tot * 100).toFixed(0)}% of revenue` : 'no articles'); })),
+    card('Every article in this selection', 'Rise elasticity; bigger dot = more revenue. Left = customers react strongly, right = they barely react. Click a dot for the article.', dist),
+    card('Articles', 'Click a row for the full explanation', dataTable({ rows, sort: { k: 'rev', dir: -1 }, pageSize: 100, onRow: (r) => { SEL.code = r.code; store.set('sel', SEL); render(); }, cols: [
+      { h: 'Article', key: 'name', f: artCell }, { h: 'Rise', key: 'e_rise', num: 1, f: (r) => r.e_rise.toFixed(2) }, { h: 'Cut', key: 'e_cut', num: 1, f: (r) => r.e_cut.toFixed(2) },
+      { h: 'Band', key: 'e', f: (r) => pill(bandOf(r.e), BAND_TONE[bandOf(r.e)]) }, { h: 'Confidence', key: 'conf', f: (r) => pill(r.conf, r.conf === 'High' ? 'ok' : r.conf === 'Low' ? 'warn' : '') },
+      { h: 'Stays in sub group', key: 'div', num: 1, f: (r) => fmt.pct((r.div || 0) * 100, 0, false) }, { h: 'Revenue', key: 'rev', num: 1, f: (r) => fmt.usd(r.rev) }] })));
+}
+function elasArticle(s) {
+  const wrap = el('div', { style: 'display:grid;gap:18px' });
+  const back = el('div', { class: 'toolbar' }, el('button', { class: 'btn', onclick: () => { SEL.code = ''; store.set('sel', SEL); render(); } }, '← All articles'), el('button', { class: 'btn', onclick: () => go('today') }, '← Today’s price'),
+    el('button', { class: 'btn primary', onclick: () => { SIM.code = s.code; SIM.d = Math.round(s.chg); go('simulator'); } }, 'Try a price →'));
+  wrap.append(el('section', { class: 'card' }, el('div', { class: 'card-head' }, articleHead(s, pill(bandOf(s.e), BAND_TONE[bandOf(s.e)]), pill(s.conf + ' confidence', s.conf === 'High' ? 'ok' : s.conf === 'Low' ? 'warn' : '')), back)));
+  if (s.e == null || !simulate(s, 0.05)) { wrap.append(el('div', { class: 'banner warn' }, 'This article has no measured price elasticity (too little sales history or price variation), so the plan holds its price.')); return wrap; }
+  const up = simulate(s, 0.05), dn = simulate(s, -0.05);
+  const caut = (d) => (Math.pow(1 + d, Math.min((d > 0 ? s.e_rise : s.e_cut) * Math.min(2, Math.max(1, (s.e_caut / s.e) || 1.5)), -0.1)) - 1) * 100;
+  const opt = (d) => (Math.pow(1 + d, (d > 0 ? s.e_rise : s.e_cut) * 0.67) - 1) * 100;
+  const curve = el('div', { class: 'chart' });
+  wrap.append(el('section', { class: 'card' }, el('p', { class: 'big-sentence' }, 'If the price goes ', el('b', {}, 'up 5%'), ', units fall about ', el('b', {}, fmt.pct(-up.unitsPct, 1, false)),
+      ` (between ${fmt.pct(-opt(0.05), 1, false)} and ${fmt.pct(-caut(0.05), 1, false)}). If it goes `, el('b', {}, 'down 5%'), ', units rise about ', el('b', {}, fmt.pct(dn.unitsPct, 1, false)), '.'),
+    el('p', { class: 'note' }, s.e_rise > -0.5 ? 'Customers barely react: a modest rise keeps almost all units and lifts profit.' : s.e_rise > -1 ? 'Customers react moderately: small rises usually pay; large ones cost volume.'
+      : s.e_rise > -2 ? 'Customers react about one-for-one: a rise pays only when the margin is thin.' : 'Customers react strongly: rises cost profit; this article competes on price.')),
+    el('div', { class: 'kpis' }, kpi('Rise elasticity', s.e_rise.toFixed(2), 'used for price rises'), kpi('Cut elasticity', s.e_cut.toFixed(2), 'used for price cuts'),
+      kpi('Cautious case', s.e_caut.toFixed(2), 'customers react more than expected'), kpi('Switching', fmt.pct((s.div || 0) * 100, 0, false), 'of lost sales stay with sub-group rivals'),
+      kpi('Tested price range', s.down != null ? `−${(s.down * 100).toFixed(0)}% / +${(s.up * 100).toFixed(0)}%` : '–', 'past price moves seen in the data')),
+    card('Units at every price', 'Likely change in units (line), cautious to optimistic range (shaded), tested range (light band). Outside the tested range the model extrapolates.', curve));
+  later(() => {
+    curve.replaceChildren(); const h = 300; const { w } = measure(curve, h); const m = { t: 14, r: 14, b: 30, l: 52 };
+    const ds = d3.range(-15, 16); const x = d3.scaleLinear().domain([-15, 15]).range([m.l, w - m.r]);
+    const pts = ds.map((d) => ({ d, l: (Math.pow(1 + d / 100, d > 0 ? s.e_rise : s.e_cut) - 1) * 100, c: caut(d / 100), o: opt(d / 100) }));
+    const y = d3.scaleLinear().domain(d3.extent(pts.flatMap((p) => [p.l, p.c, p.o]))).nice().range([h - m.b, m.t]);
+    const svg = d3.select(curve).append('svg').attr('width', w).attr('height', h).attr('role', 'img').attr('aria-label', 'Units change by price change');
+    const lo = -(s.down || .05) * 100, hi = (s.up || .05) * 100;
+    svg.append('rect').attr('x', x(Math.max(-15, lo))).attr('width', x(Math.min(15, hi)) - x(Math.max(-15, lo))).attr('y', m.t).attr('height', h - m.t - m.b).attr('fill', 'var(--plum-50)');
+    svg.append('g').attr('class', 'gridl').attr('transform', `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(6).tickSize(-(w - m.l - m.r)).tickFormat(''));
+    svg.append('g').attr('class', 'ax').attr('transform', `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(6).tickFormat((v) => (v > 0 ? '+' : '') + v + '%').tickSize(0)).call((g) => g.select('.domain').remove()).selectAll('text').attr('dx', -6);
+    svg.append('g').attr('class', 'ax').attr('transform', `translate(0,${h - m.b})`).call(d3.axisBottom(x).ticks(7).tickFormat((v) => (v > 0 ? '+' : '') + v + '% price').tickSizeOuter(0));
+    svg.append('line').attr('x1', m.l).attr('x2', w - m.r).attr('y1', y(0)).attr('y2', y(0)).attr('stroke', 'var(--plum-200)');
+    svg.append('path').datum(pts).attr('fill', 'var(--gold-100)').attr('opacity', .9).attr('d', d3.area().x((p) => x(p.d)).y0((p) => y(Math.min(p.c, p.o))).y1((p) => y(Math.max(p.c, p.o))));
+    svg.append('path').datum(pts).attr('fill', 'none').attr('stroke', 'var(--plum)').attr('stroke-width', 2.6).attr('d', d3.line().x((p) => x(p.d)).y((p) => y(p.l)));
+    svg.append('rect').attr('x', m.l).attr('y', m.t).attr('width', w - m.l - m.r).attr('height', h - m.t - m.b).attr('fill', 'transparent')
+      .on('mousemove', (ev) => { const d = Math.round(x.invert(d3.pointer(ev)[0])); const p = pts.find((q) => q.d === d); if (p) showTip(ev, `Price ${fmt.pct(d, 0)}`, [['Units, likely', fmt.pct(p.l)], ['Range', `${fmt.pct(Math.min(p.c, p.o))} to ${fmt.pct(Math.max(p.c, p.o))}`]]); })
+      .on('mouseleave', hideTip);
+  });
+  return wrap;
+}
+
+// ---------------------------------------------------------------- 4. Forecast and target
+const FC = { source: 'current', upload: null, info: null, result: null,
+  t: store.get('target', { target: '', maxRise: 8, lowRise: 5, unitCap: 15, basket: 1.8, holdKvi: true, cuts: true }) };
+function planWith(t, units) {
+  const pool = SKUS.filter((s) => s.shelf && simulate(s, 0) && !(t.holdKvi && s.kvi));
+  const revAll = d3.sum(SKUS, (s) => s.rev) || 1;
+  const cand = pool.map((s) => {
+    const base = units && units.has(s.code) ? units.get(s.code) : s.units; const ss = { ...s, units: base };
+    const up = Math.min(s.conf === 'Low' ? t.lowRise : t.maxRise, Math.max(3, (s.up || .05) * 100));
+    const dn = t.cuts && !s.supply_risk ? Math.min(10, Math.max(3, (s.down || .05) * 100)) : 0;
+    const opts = [];
+    for (let d = -Math.floor(dn); d <= Math.floor(up); d++) {
+      if (d > 0 && s.repriced >= 15) continue;
+      if (d < 0 && s.p_net * (1 + d / 100) < s.cost) continue;
+      const p = simulate(ss, d / 100); if (!p) continue;
+      if (d > 0 && (p.unitsPct < -t.unitCap || (s.conf === 'Low' && (Math.pow(1 + d / 100, Math.min(s.e_rise * Math.min(2, Math.max(1, (s.e_caut / s.e) || 1.5)), -0.2)) - 1) * 100 < -t.unitCap))) continue;
+      opts.push({ d, gain: p.gain, gainS: p.gainS, unitsPct: p.unitsPct, w: s.rev * d / 100 });
+    }
+    return { s, base, opts };
+  });
+  const run = (lam) => { let gain = 0, gainS = 0, bw = 0; const pick = new Map();
+    cand.forEach(({ s, opts }) => { let best = null; opts.forEach((o) => { if (o.d === 0) return; const v = o.gain - lam * o.w * 1; if (o.gain > 200 && (!best || v > best.v)) best = { ...o, v }; });
+      if (best && best.v > 0) { pick.set(s.code, best); gain += best.gain; gainS += best.gainS; bw += best.w; } });
+    return { pick, gain, gainS, basket: bw / revAll * 100, lam }; };
+  let r = run(0);
+  if (r.basket > t.basket) { let lo = 0, hi = 5; for (let i = 0; i < 30; i++) { const mid = (lo + hi) / 2; const x = run(mid); if (x.basket > t.basket) lo = mid; else { hi = mid; r = x; } } }
+  const target = parseFloat(t.target);
+  let met = null;
+  if (target > 0) { met = r.gain >= target; if (met) { let lo = r.lam, hi = r.lam + 5, best = r; for (let i = 0; i < 30; i++) { const mid = (lo + hi) / 2; const x = run(mid); if (x.gain >= target) { lo = mid; best = x; } else hi = mid; } r = best; } }
+  const units0 = d3.sum(cand, (c) => c.base); const units1 = d3.sum(cand, (c) => c.base * (1 + ((r.pick.get(c.s.code) || {}).unitsPct || 0) / 100));
+  return { ...r, met, target, rises: [...r.pick.values()].filter((o) => o.d > 0).length, cuts: [...r.pick.values()].filter((o) => o.d < 0).length, unitsPct: (units1 / units0 - 1) * 100, t: { ...t }, source: units ? 'upload' : 'current' };
+}
+function parseForecast(text) {
+  const lines = text.replace(/\r/g, '').split('\n').filter((l) => l.trim()); if (lines.length < 2) throw new Error('the file is empty');
+  const sep = lines[0].includes(';') && !lines[0].includes(',') ? ';' : ',';
+  const hdr = lines[0].split(sep).map((h) => h.trim().replace(/^"|"$/g, '').toLowerCase());
+  const ci = hdr.findIndex((h) => ['sku_code', 'code', 'article', 'article_code', 'articlecode'].includes(h));
+  const wi = hdr.findIndex((h) => ['week_start', 'week'].includes(h));
+  const ui = hdr.findIndex((h) => ['units_52w', 'units', 'forecast', 'qty'].includes(h));
+  if (ci < 0 || ui < 0) throw new Error('need a code column (SKU_Code) and a units column (Units_52w, or Week_Start + Units)');
+  const out = new Map(); let bad = 0;
+  lines.slice(1).forEach((l) => { const c = l.split(sep).map((x) => x.trim().replace(/^"|"$/g, '')); const code = String(c[ci] || '').replace(/^0+/, ''); const u = parseFloat(c[ui]);
+    if (!code || isNaN(u)) { bad++; return; } out.set(code, (out.get(code) || 0) + u); });
+  return { map: out, weekly: wi >= 0, rows: lines.length - 1, bad };
+}
+V.forecast = () => {
+  const t = FC.t; const out = el('div', { style: 'display:grid;gap:18px' });
+  const chart = el('div', { class: 'chart' });
+  const seg = el('div', { class: 'seg' }, ['current', 'upload'].map((k) => el('button', { 'aria-pressed': String(FC.source === k), onclick: () => { FC.source = k; render(); } }, k === 'current' ? 'Use the current forecast' : 'Upload my forecast')));
+  const fcCard = el('section', { class: 'card' }, el('div', { class: 'card-head' }, el('div', {}, el('h2', {}, 'Forecast'), el('p', { class: 'sub' }, 'Units each article will sell in the next 52 weeks at today’s price')), seg));
+  if (FC.source === 'current') {
+    fcCard.append(el('div', { class: 'banner info' }, `Our forecast: ${fmt.n(SKUS.filter((s) => s.units > 0).length)} articles, a blend of machine learning and the seasonal path (weekly error about ${fmt.pct(M.forecast[0].Mean_WAPE_week, 0, false)}, 13-week error ${fmt.pct(M.forecast[0].Mean_WAPE_13w, 0, false)}).`), chart);
+    later(() => { const ds = WEEKLY.weeks.map((d) => new Date(d)); lineChart(chart, { dates: ds, h: 240, yfmt: (v) => fmt.n(v / 1000, 0) + 'K', series: [{ name: 'Units, all articles', values: WEEKLY.chain.map((r) => r.Units_now), color: 'var(--plum)', width: 2.4 }] }); });
+  } else {
+    const file = el('input', { type: 'file', accept: '.csv,text/csv', hidden: true, onchange: (e) => readFile(e.target.files[0]) });
+    const drop = el('div', { class: 'drop', onclick: () => file.click(), ondragover: (e) => { e.preventDefault(); drop.classList.add('over'); }, ondragleave: () => drop.classList.remove('over'),
+      ondrop: (e) => { e.preventDefault(); drop.classList.remove('over'); readFile(e.dataTransfer.files[0]); } },
+      el('b', {}, 'Drop a CSV here or click to choose'), el('div', { class: 'note', style: 'margin-top:6px' }, 'Columns: SKU_Code and Units_52w (one row per article), or SKU_Code, Week_Start and Units (weekly rows, added up). Same units as the template.'));
+    const tmpl = el('button', { class: 'btn', onclick: () => csvDownload('fresmart_forecast_template.csv', [['SKU_Code', 'code'], ['Article', 'name'], ['MainGroup', 'group'], ['SubGroup', 'sub'], ['ShortDesc', 'sd'], ['Units_52w', (r) => Math.round(r.units)]], SKUS.filter((s) => s.shelf && s.units > 0)) }, '↓ Template with our forecast');
+    fcCard.append(drop, file, el('div', { class: 'toolbar' }, tmpl, FC.upload ? el('button', { class: 'btn', onclick: () => { FC.upload = null; FC.info = null; render(); } }, 'Clear upload') : null));
+    if (FC.info) { const i = FC.info;
+      fcCard.append(el('div', { class: 'banner ' + (i.matched ? 'ok' : 'warn') }, `${i.name}: ${fmt.n(i.rows)} rows, ${fmt.n(i.matched)} articles matched, ${fmt.n(i.unmatched)} codes not found${i.bad ? `, ${fmt.n(i.bad)} rows unreadable` : ''}. Matched articles: ${fmt.n(i.theirs)} units vs ${fmt.n(i.ours)} in our forecast (${fmt.pct((i.theirs / i.ours - 1) * 100)}).`));
+      if (i.diff.length) fcCard.append(dataTable({ rows: i.diff, cols: [{ h: 'Article', f: (r) => artCell(r.s) }, { h: 'Our forecast', num: 1, f: (r) => fmt.n(r.ours) }, { h: 'Yours', num: 1, f: (r) => fmt.n(r.theirs) }, { h: 'Difference', num: 1, f: (r) => fmt.pct((r.theirs / r.ours - 1) * 100) }] })); }
+    if (FC.error) fcCard.append(el('div', { class: 'banner warn' }, FC.error));
+  }
+  function readFile(f) { if (!f) return; const rd = new FileReader(); rd.onload = () => { try { const p = parseForecast(String(rd.result)); const m = new Map(); let unmatched = 0;
+      p.map.forEach((u, c) => { if (BY_CODE.has(c)) m.set(c, u); else unmatched++; });
+      const diff = [...m.entries()].map(([c, u]) => ({ s: BY_CODE.get(c), ours: BY_CODE.get(c).units, theirs: u })).filter((r) => r.ours > 0).sort((a, b) => Math.abs(b.theirs - b.ours) - Math.abs(a.theirs - a.ours)).slice(0, 10);
+      FC.upload = m; FC.error = null; FC.info = { name: f.name, rows: p.rows, bad: p.bad, matched: m.size, unmatched, theirs: d3.sum([...m.entries()].filter(([c]) => BY_CODE.get(c).units > 0), ([, u]) => u), ours: d3.sum([...m.keys()], (c) => BY_CODE.get(c).units || 0) || 1, diff };
+    } catch (e) { FC.error = `Could not read ${f.name}: ${e.message}.`; } render(); }; rd.readAsText(f); }
+  const num = (key, label, hint, step = 1) => el('label', { class: 'field' }, label, el('input', { class: 'inp', type: 'number', step, min: 0, value: t[key], oninput: (e) => { t[key] = e.target.value === '' ? '' : +e.target.value; store.set('target', t); } }), el('span', { class: 'hint' }, hint));
+  const chk = (key, label) => el('label', { class: 'check' }, el('input', { type: 'checkbox', checked: t[key] || null, onchange: (e) => { t[key] = e.target.checked; store.set('target', t); } }), label);
+  const tgCard = el('section', { class: 'card' }, el('div', { class: 'card-head' }, el('div', {}, el('h2', {}, 'Target and limits'), el('p', { class: 'sub' }, 'Set the profit you want and the limits; leave the target empty to get the most profit within the limits'))),
+    el('div', { class: 'form-grid' }, el('label', { class: 'field' }, 'Profit gain target, US$ per year', el('input', { class: 'inp', type: 'number', step: 50000, min: 0, placeholder: 'e.g. 1500000', value: t.target, oninput: (e) => { t.target = e.target.value; store.set('target', t); } }), el('span', { class: 'hint' }, `the official plan gains ${fmt.usd(M.plan.gain)}`)),
+      num('maxRise', 'Biggest price rise, %', 'any article'), num('lowRise', 'Biggest rise, low-confidence articles, %', 'less evidence, smaller steps'), num('unitCap', 'Most units an article may lose, %', 'per article, likely case'),
+      num('basket', 'Basket rise cap, %', 'sales-weighted, all articles', 0.1)),
+    el('div', { class: 'toolbar' }, chk('holdKvi', 'Hold everyday KVIs (112 articles)'), chk('cuts', 'Allow price cuts'),
+      el('button', { class: 'btn primary', style: 'margin-left:auto', onclick: () => { FC.result = planWith(t, FC.source === 'upload' ? FC.upload : null); render(); } }, 'Build my plan')));
+  out.append(fcCard, tgCard);
+  if (FC.result) { const r = FC.result;
+    out.append(el('section', { class: 'card' }, el('div', { class: 'card-head' }, el('div', {}, el('h2', {}, 'Your plan'), el('p', { class: 'sub' }, `${r.source === 'upload' ? 'Your uploaded forecast' : 'Current forecast'} · rises ≤ ${r.t.maxRise}% (low confidence ≤ ${r.t.lowRise}%) · units ≤ −${r.t.unitCap}% · basket ≤ ${r.t.basket}%`)),
+        el('button', { class: 'btn primary', onclick: () => { PL.plan = 'custom'; go('prices'); } }, 'See it in Recommended price →')),
+      r.met === false ? el('div', { class: 'banner warn' }, `The target of ${fmt.usd(r.target)} cannot be reached within these limits; the best is ${fmt.usd(r.gain)}. Loosen a limit or lower the target.`)
+        : r.met ? el('div', { class: 'banner ok' }, `Target of ${fmt.usd(r.target)} reached with the gentlest prices that still get there.`) : null,
+      el('div', { class: 'kpis' }, kpi('Gain, likely', fmt.usd(r.gain), `official plan ${fmt.usd(M.plan.gain)}`), kpi('Gain, cautious', fmt.usd(r.gainS), 'customers react 1.5x'), kpi('Price rises', fmt.n(r.rises), `${fmt.n(r.cuts)} cuts`),
+        kpi('Basket rise', fmt.pct(r.basket, 2), `cap ${r.t.basket}%`), kpi('Units', fmt.pct(r.unitsPct), 'articles priced')),
+      el('p', { class: 'note' }, 'Your plan is built here in the browser from each article’s own sales: it leaves out shoppers switching between brands, the sub-group profit check and shelf-price endings, so it differs a little from the official plan. To make it official, the optimiser is re-run in Python with your forecast and limits.'))); }
+  return [head('Step 4', 'Forecast & target', 'Use our forecast or upload your own, set the profit you want and the limits, and build a plan.'), out];
+};
+
+// ---------------------------------------------------------------- 5. Promotions
+const PROMO = store.get('promo', { items: [], disc: 10, weeks: 2, start: '' });
+const PSEL = { group: '', sub: '', sd: '', code: '', q: '' };
+function promoCalc(s, disc, weeks) {
+  if (!simulate(s, 0)) return null;
+  const wk = s.units / 52, d = -disc / 100;
+  const u = (e) => wk * Math.pow(1 + d, e);
+  const uL = u(s.e_cut), uLo = u(s.e_cut * 0.67), uHi = u(s.e_cut * 1.5);
+  const m0 = s.p_net - s.cost, m1 = s.p_net * (1 + d) - s.cost;
+  const own = (uu) => (uu * m1 - wk * m0) * weeks / FX;
+  const cannib = (uu) => (s.div || 0) * Math.max(0, uu - wk) * m0 * weeks / FX;
+  return { wk, units: uL * weeks, extra: (uL - wk) * weeks, extraPct: (uL / wk - 1) * 100, promoPrice: s.price * (1 + d), own: own(uL), net: own(uL) - cannib(uL),
+    netLo: own(uLo) - cannib(uLo), netHi: own(uHi) - cannib(uHi), revExtra: (uL * s.p_net * (1 + d) - wk * s.p_net) * weeks / FX, giveaway: wk * s.p_net * disc / 100 * weeks / FX, belowCost: m1 < 0 };
+}
+V.promos = () => {
+  const out = el('div', { style: 'display:grid;gap:18px' });
+  const save = () => store.set('promo', PROMO);
+  const add = (codes) => { codes.forEach((c) => { if (!PROMO.items.some((i) => i.code === c)) PROMO.items.push({ code: c, disc: PROMO.disc, weeks: PROMO.weeks }); }); save(); render(); };
+  const pick = el('section', { class: 'card' }); out.append(pick);
+  function drawPick() {
+    const pool = SKUS.filter((s) => s.shelf && simulate(s, 0) && inSel(s, PSEL) && (!PSEL.q || s.name.toLowerCase().includes(PSEL.q) || s.code.includes(PSEL.q))).sort((a, b) => b.rev - a.rev);
+    pick.replaceChildren(el('div', { class: 'card-head' }, el('div', {}, el('h2', {}, 'Choose articles'), el('p', { class: 'sub' }, 'Filter, then add articles to the promotion'))),
+      hierFilter(PSEL, drawPick), el('input', { class: 'inp', type: 'search', placeholder: 'Search name or code', value: PSEL.q, oninput: (e) => { PSEL.q = e.target.value.trim().toLowerCase(); drawPick(); } }),
+      el('div', { class: 'tablebox short' }, el('table', { class: 't' }, el('tbody', {}, pool.slice(0, 40).map((s) => el('tr', {}, el('td', {}, artCell(s)), el('td', { class: 'num' }, fmt.kz(s.price)),
+        el('td', { class: 'num' }, pill(bandOf(s.e_cut), BAND_TONE[bandOf(s.e_cut)])), el('td', { class: 'num' }, PROMO.items.some((i) => i.code === s.code) ? pill('Added', 'ok') : el('button', { class: 'btn', onclick: () => add([s.code]) }, '+ Add'))))))),
+      el('div', { class: 'toolbar' }, el('span', { class: 'note' }, `${fmt.n(pool.length)} articles on the shelf match${pool.length > 40 ? '; showing the 40 biggest' : ''}`),
+        pool.length ? el('button', { class: 'btn', style: 'margin-left:auto', onclick: () => add(pool.slice(0, 25).map((s) => s.code)) }, `+ Add top ${Math.min(25, pool.length)}`) : null));
+  }
+  drawPick();
+  const rows = PROMO.items.map((i) => ({ ...i, s: BY_CODE.get(i.code) })).filter((r) => r.s).map((r) => ({ ...r, c: promoCalc(r.s, r.disc, r.weeks) })).filter((r) => r.c);
+  const T = { own: d3.sum(rows, (r) => r.c.own), net: d3.sum(rows, (r) => r.c.net), lo: d3.sum(rows, (r) => r.c.netLo), hi: d3.sum(rows, (r) => r.c.netHi), extra: d3.sum(rows, (r) => r.c.extra), rev: d3.sum(rows, (r) => r.c.revExtra), give: d3.sum(rows, (r) => r.c.giveaway) };
+  const warn = (r) => [r.c.belowCost ? pill('Below cost', 'bad') : null, r.s.kvi ? pill('Everyday KVI', 'plum') : null, (r.s.supply_risk || r.s.stockout >= 20) ? pill('Short supply', 'bad') : null,
+    r.s.chg > 0 ? pill('Rise planned', 'warn') : null, r.s.conf === 'Low' ? pill('Low confidence', 'warn') : null].filter(Boolean);
+  const setAll = el('div', { class: 'toolbar' }, el('label', { class: 'field' }, 'Discount, %', el('input', { class: 'inp', type: 'number', min: 1, max: 60, value: PROMO.disc, oninput: (e) => { PROMO.disc = +e.target.value; save(); } })),
+    el('label', { class: 'field' }, 'Weeks', el('input', { class: 'inp', type: 'number', min: 1, max: 12, value: PROMO.weeks, oninput: (e) => { PROMO.weeks = +e.target.value; save(); } })),
+    el('label', { class: 'field' }, 'Start', el('input', { class: 'inp', type: 'date', value: PROMO.start, onchange: (e) => { PROMO.start = e.target.value; save(); } })),
+    el('button', { class: 'btn', style: 'align-self:end', onclick: () => { PROMO.items.forEach((i) => { i.disc = PROMO.disc; i.weeks = PROMO.weeks; }); save(); render(); } }, 'Apply to all'),
+    rows.length ? el('button', { class: 'btn', style: 'align-self:end', onclick: () => csvDownload('fresmart_promotion.csv', [['Code', (r) => r.code], ['Article', (r) => r.s.name], ['MainGroup', (r) => r.s.group], ['SubGroup', (r) => r.s.sub], ['ShortDesc', (r) => r.s.sd],
+      ['Shelf price Kz', (r) => r.s.price], ['Promo price Kz', (r) => r.c.promoPrice.toFixed(2)], ['Discount %', 'disc'], ['Weeks', 'weeks'], ['Start', () => PROMO.start], ['Extra units', (r) => Math.round(r.c.extra)], ['GP change own USD', (r) => Math.round(r.c.own)], ['GP change net USD', (r) => Math.round(r.c.net)]], rows) }, '↓ Export CSV') : null,
+    rows.length ? el('button', { class: 'btn', style: 'align-self:end', onclick: () => { PROMO.items = []; save(); render(); } }, 'Clear list') : null);
+  out.append(el('section', { class: 'card' }, el('div', { class: 'card-head' }, el('div', {}, el('h2', {}, 'Promotion'), el('p', { class: 'sub' }, `${fmt.n(rows.length)} articles${PROMO.start ? ' · from ' + PROMO.start : ''}`))), setAll,
+    rows.length ? el('div', { class: 'kpis' }, kpi('Extra units', fmt.n(T.extra), 'over the promotion'), kpi('Extra revenue', fmt.usdSigned(T.rev), 'after IVA'), kpi('Discount given away', fmt.usd(T.give), 'on the units you would sell anyway'),
+      kpi('Gross profit, own', fmt.usdSigned(T.own), 'these articles only', T.own < 0 ? 'down' : 'up'), kpi('Gross profit, net', fmt.usdSigned(T.net), `after switching from rivals; range ${fmt.usdSigned(Math.min(T.lo, T.hi))} to ${fmt.usdSigned(Math.max(T.lo, T.hi))}`, T.net < 0 ? 'down' : 'up')) : el('p', { class: 'empty' }, 'Add articles above to plan a promotion.'),
+    rows.length ? dataTable({ rows, cols: [{ h: 'Article', f: (r) => artCell(r.s) }, { h: 'Price → promo', num: 1, f: (r) => el('div', {}, el('div', { class: 'muted', style: 'text-decoration:line-through' }, fmt.kz(r.s.price)), el('b', {}, fmt.kz(r.c.promoPrice))) },
+      { h: 'Discount %', num: 1, f: (r) => el('input', { class: 'inline-inp', type: 'number', min: 1, max: 60, value: r.disc, onchange: (e) => { PROMO.items.find((i) => i.code === r.code).disc = +e.target.value; save(); render(); } }) },
+      { h: 'Weeks', num: 1, f: (r) => el('input', { class: 'inline-inp', type: 'number', min: 1, max: 12, value: r.weeks, onchange: (e) => { PROMO.items.find((i) => i.code === r.code).weeks = +e.target.value; save(); render(); } }) },
+      { h: 'Units lift', num: 1, f: (r) => fmt.pct(r.c.extraPct, 0) }, { h: 'GP, own', num: 1, f: (r) => el('span', { class: r.c.own < 0 ? 'down' : 'up' }, fmt.usdSigned(r.c.own)) },
+      { h: 'GP, net', num: 1, f: (r) => el('b', { class: r.c.net < 0 ? 'down' : 'up' }, fmt.usdSigned(r.c.net)) }, { h: 'Watch', f: (r) => el('div', { class: 'chips' }, warn(r)) },
+      { h: '', f: (r) => el('button', { class: 'btn', onclick: () => { PROMO.items = PROMO.items.filter((i) => i.code !== r.code); save(); render(); } }, 'Remove') }] }) : null,
+    el('p', { class: 'note' }, 'Estimated from each article’s price-cut elasticity; the range uses customers reacting a third less to 1.5x more. Fresmart’s promotion history is not in the data yet, so short promotions may lift more (stock-up buying) or less than shown. "Net" takes off the profit of sales that switch over from sub-group rivals.')));
+  return [head('Step 5', 'Promotions', 'Try a promotion: pick articles, a discount and the weeks, and see units and profit before it runs.'), out];
+};
+
+const PL = { q: '', wave: '', group: '', sub: '', sd: '', code: '', conf: '', dir: 'changed', plan: 'official' };
+/* the plan shown: official (pipeline) or the user's own (Forecast & target page), as per-article rows */
+function planRows() {
+  if (PL.plan !== 'custom' || !FC.result) return SKUS;
+  return SKUS.map((s) => { const o = FC.result.pick.get(s.code); const d = o ? o.d : 0;
+    return { ...s, chg: d, new_price: s.price ? s.price * (1 + d / 100) : s.price, gain: o ? o.gain : 0, gain_c: o ? o.gainS : 0, units_chg: o ? o.unitsPct : 0,
+      m_new: s.p_net ? (s.p_net * (1 + d / 100) - s.cost) / (s.p_net * (1 + d / 100)) * 100 : s.m_now, wave: o ? 'Your plan' : 'Hold', reason: o ? `Your plan: ${fmt.pct(d, 0)} (built on the Forecast & target page)` : 'Your plan: no change' }; });
+}
 V.prices = () => {
-  const groups = [...new Set(SKUS.map((s) => s.group))].sort();
+  if (PL.plan === 'custom' && !FC.result) PL.plan = 'official';
+  const all = planRows();
   const count = el('span', { class: 'count' });
-  const filt = () => SKUS.filter((s) => (!PL.q || s.name.toLowerCase().includes(PL.q) || s.code.includes(PL.q)) && (!PL.wave || s.wave === PL.wave) && (!PL.group || s.group === PL.group)
+  const filt = () => all.filter((s) => (!PL.q || s.name.toLowerCase().includes(PL.q) || s.code.includes(PL.q)) && inSel(s, PL) && (!PL.wave || s.wave === PL.wave)
     && (!PL.conf || s.conf === PL.conf) && (PL.dir === 'all' || (PL.dir === 'changed' && s.chg !== 0) || (PL.dir === 'held' && s.chg === 0 && s.shelf) || (PL.dir === 'flags' && s.flags > 0 && s.chg !== 0) || (PL.dir === 'off' && !s.shelf)));
   const cols = [
-    { h: 'Article', key: 'name', f: (r) => el('div', {}, el('div', { class: 'name' }, r.name), el('div', { class: 'muted' }, `${r.code} · ${r.sub}`)) },
-    { h: 'Group', key: 'group', f: (r) => el('span', { class: 'muted' }, r.group) },
-    { h: 'Now', key: 'price', num: 1, f: (r) => fmt.kz(r.price) }, { h: 'New', key: 'new_price', num: 1, f: (r) => r.chg ? el('b', {}, fmt.kz(r.new_price)) : fmt.kz(r.price) },
+    { h: 'Article', key: 'name', f: artCell },
+    { h: 'Today', key: 'price', num: 1, f: (r) => fmt.kz(r.price) }, { h: 'Recommended', key: 'new_price', num: 1, f: (r) => r.chg ? el('b', {}, fmt.kz(r.new_price)) : fmt.kz(r.price) },
     { h: 'Change', key: 'chg', num: 1, f: (r) => chgPill(r.chg) }, { h: 'Units', key: 'units_chg', num: 1, f: (r) => r.chg ? fmt.pct(r.units_chg) : '–' },
     { h: 'Margin now → new', key: 'm_now', num: 1, f: (r) => r.m_now == null ? '–' : r.chg ? `${r.m_now.toFixed(1)}% → ${r.m_new.toFixed(1)}%` : `${r.m_now.toFixed(1)}%` },
     { h: 'Gain', key: 'gain', num: 1, f: (r) => r.gain ? fmt.usdSigned(r.gain) : '–' },
     { h: 'Confidence', key: 'conf', f: (r) => pill(r.conf || '–', r.conf === 'High' ? 'ok' : r.conf === 'Low' ? 'warn' : '') },
-    { h: 'Wave', key: 'wave', f: (r) => el('span', { class: 'muted' }, r.wave) }];
+    { h: 'Wave', key: 'wave', f: (r) => el('span', { class: 'muted', style: 'white-space:nowrap' }, r.wave) }];
   const table = dataTable({ cols, rows: filt(), sort: { k: 'gain', dir: -1 }, onRow: (r) => openSku(r.code), pageSize: 100 });
   const refresh = () => { const rs = filt(); table.update(rs); count.textContent = `${fmt.n(rs.length)} articles · their gain ${fmt.usd(d3.sum(rs, (r) => r.gain))} a year`; };
   const chip = (key, val, label, n) => { const b = el('button', { class: 'chip', 'aria-pressed': String(PL[key] === val), onclick: () => { PL[key] = val; b.parentElement.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-pressed', 'false')); b.setAttribute('aria-pressed', 'true'); refresh(); } }, label, n != null ? el('span', { class: 'n' }, fmt.n(n)) : null); return b; };
-  const sel = (key, label, opts) => { const s = el('select', { class: 'sel', 'aria-label': label, onchange: (e) => { PL[key] = e.target.value; refresh(); } }, el('option', { value: '' }, label), opts.map((o) => el('option', { value: o, selected: PL[key] === o || null }, o))); return s; };
-  const exportBtn = el('button', { class: 'btn', onclick: () => csvDownload('fresmart_price_list.csv', [['Code', 'code'], ['Article', 'name'], ['MainGroup', 'group'], ['SubGroup', 'sub'], ['Shelf price Kz', 'price'],
-    ['New shelf price Kz', 'new_price'], ['Change %', (r) => r.chg.toFixed(2)], ['Units change %', 'units_chg'], ['Margin now %', 'm_now'], ['Margin new %', 'm_new'], ['GP gain 52w USD', 'gain'],
-    ['GP gain cautious USD', 'gain_c'], ['Confidence', 'conf'], ['Wave', 'wave'], ['Reason', 'reason']], filt()) }, '↓ Export CSV');
-  const dirChips = el('div', { class: 'chips' }, chip('dir', 'changed', 'Price changes', SKUS.filter((s) => s.chg).length), chip('dir', 'held', 'On shelf, held', SKUS.filter((s) => !s.chg && s.shelf).length),
-    chip('dir', 'flags', 'Changes with flags', SKUS.filter((s) => s.chg && s.flags > 0).length), chip('dir', 'off', 'Not on shelf', SKUS.filter((s) => !s.shelf).length), chip('dir', 'all', 'All', SKUS.length));
+  const sel = (key, label, opts) => el('select', { class: 'sel', 'aria-label': label, onchange: (e) => { PL[key] = e.target.value; refresh(); } }, el('option', { value: '' }, label), opts.map((o) => el('option', { value: o, selected: PL[key] === o || null }, o)));
+  const exportBtn = el('button', { class: 'btn', onclick: () => csvDownload(PL.plan === 'custom' ? 'fresmart_recommended_prices_your_plan.csv' : 'fresmart_recommended_prices.csv', [['Code', 'code'], ['Article', 'name'], ['MainGroup', 'group'], ['SubGroup', 'sub'],
+    ['ShortDesc', 'sd'], ['Shelf price today Kz', 'price'], ['Recommended price Kz', (r) => (r.chg ? r.new_price : r.price)], ['Change %', (r) => r.chg.toFixed(2)], ['Units change %', 'units_chg'], ['Margin now %', 'm_now'], ['Margin new %', 'm_new'],
+    ['GP gain 52w USD', 'gain'], ['GP gain cautious USD', 'gain_c'], ['Confidence', 'conf'], ['Wave', 'wave'], ['Reason', 'reason']], filt()) }, '↓ Export CSV');
+  const planSeg = el('div', { class: 'seg' }, el('button', { 'aria-pressed': String(PL.plan === 'official'), onclick: () => { PL.plan = 'official'; render(); } }, 'Official plan'),
+    el('button', { 'aria-pressed': String(PL.plan === 'custom'), disabled: FC.result ? null : true, title: FC.result ? null : 'Build a plan on the Forecast & target page first', onclick: () => { PL.plan = 'custom'; render(); } }, 'Your plan'));
+  const hier = el('div', {});
+  const drawHier = () => { hier.replaceChildren(hierFilter(PL, () => { drawHier(); refresh(); })); };
+  drawHier();
+  const dirChips = el('div', { class: 'chips' }, chip('dir', 'changed', 'Price changes', all.filter((s) => s.chg).length), chip('dir', 'held', 'On shelf, held', all.filter((s) => !s.chg && s.shelf).length),
+    chip('dir', 'flags', 'Changes with flags', all.filter((s) => s.chg && s.flags > 0).length), chip('dir', 'off', 'Not on shelf', all.filter((s) => !s.shelf).length), chip('dir', 'all', 'All', all.length));
   later(refresh);
-  return [head('Price list', 'Final price list', 'Every active article with today’s shelf price, the new price and its expected effect. Click a row for the full detail.', exportBtn),
-    el('section', { class: 'card' }, dirChips,
+  return [head('Step 6', 'Recommended price', 'Today’s shelf price and the recommended price for every active article, with its expected effect. Click a row for the full detail.', planSeg, exportBtn),
+    PL.plan === 'custom' ? el('div', { class: 'banner info' }, `Showing your plan from the Forecast & target page: ${fmt.n(FC.result.rises)} rises, gain ${fmt.usd(FC.result.gain)} a year. It is built from each article’s own sales, without brand switching or price endings.`) : null,
+    el('section', { class: 'card' }, hier, dirChips,
       el('div', { class: 'toolbar' }, el('input', { class: 'inp grow', type: 'search', placeholder: 'Search name or code', value: PL.q, oninput: (e) => { PL.q = e.target.value.trim().toLowerCase(); refresh(); } }),
-        sel('wave', 'All waves', ['Wave 1', 'Review then Wave 1', 'Test', 'Hold']), sel('group', 'All groups', groups), sel('conf', 'Any confidence', ['High', 'Medium', 'Low']), count),
+        sel('wave', 'All waves', PL.plan === 'custom' ? ['Your plan', 'Hold'] : ['Wave 1', 'Review then Wave 1', 'Test', 'Hold']), sel('conf', 'Any confidence', ['High', 'Medium', 'Low']), count),
       table)];
 };
 
@@ -325,12 +653,12 @@ V.simulator = () => {
   input.addEventListener('input', () => { const q = input.value.trim().toLowerCase(); if (!q) { res.hidden = true; return; }
     const m = pool.filter((s) => s.name.toLowerCase().includes(q) || s.code.includes(q)).slice(0, 8);
     res.replaceChildren(...(m.length ? m.map((s) => el('button', { class: 'result', onclick: () => { SIM.code = s.code; SIM.d = Math.round(s.chg); input.value = ''; res.hidden = true; draw(); } },
-      el('span', { class: 'r-name' }, s.name), el('span', { class: 'r-sub' }, `${s.code} · ${s.group}`), el('span', { class: 'r-chg' }, chgPill(s.chg)))) : [el('div', { class: 'note', style: 'padding:8px' }, 'No article on the shelf matches')])); res.hidden = false; });
+      el('span', { class: 'r-name' }, s.name), el('span', { class: 'r-sub' }, `${s.group} › ${s.sub} › ${s.sd} · ${s.code}`), el('span', { class: 'r-chg' }, chgPill(s.chg)))) : [el('div', { class: 'note', style: 'padding:8px' }, 'No article on the shelf matches')])); res.hidden = false; });
   function draw() {
     const s = BY_CODE.get(SIM.code); const p = simulate(s, SIM.d / 100);
     const slider = el('input', { class: 'slider', type: 'range', min: -15, max: 15, step: 1, value: SIM.d, 'aria-label': 'Price change', oninput: (e) => { SIM.d = +e.target.value; draw(); } });
     left.replaceChildren(el('div', { class: 'combo' }, input, res),
-      el('div', {}, el('div', { class: 'eyebrow' }, `${s.code} · ${s.group}`), el('h2', { style: 'font-family:var(--f-display);font-weight:500;font-size:22px;margin:4px 0 6px;color:var(--plum)' }, s.name),
+      el('div', {}, pathEl(s, s.code), el('h2', { style: 'font-family:var(--f-display);font-weight:500;font-size:21px;margin:4px 0 6px;color:var(--ink)' }, s.name),
         el('div', { class: 'chips' }, chgPill(s.chg), pill(s.conf + ' confidence', s.conf === 'High' ? 'ok' : s.conf === 'Low' ? 'warn' : ''), s.kvi ? pill('Everyday KVI', 'plum') : null)),
       el('div', {}, el('div', { class: 'note' }, 'Price change'), el('div', { class: 'sim-big' }, fmt.pct(SIM.d, 0)), slider,
         el('div', { class: 'toolbar', style: 'margin-top:6px' }, el('button', { class: 'btn', onclick: () => { SIM.d = 0; draw(); } }, 'Today'), s.chg ? el('button', { class: 'btn primary', onclick: () => { SIM.d = Math.round(s.chg); draw(); } }, `Plan ${fmt.pct(s.chg, 1)}`) : null)),
@@ -394,7 +722,7 @@ V.monitoring = () => {
     lineChart(gp, { dates: ds, yfmt: (v) => fmt.usd(v, 0), series: [{ name: 'Today’s prices', values: c.map((r) => r.GP_now_KZ), color: 'var(--plum-200)', width: 2 }, { name: 'New prices', values: c.map((r) => r.GP_new_L_KZ), color: 'var(--gold)', width: 2.4 }] });
   });
   const changed = SKUS.filter((s) => s.chg).sort((a, b) => b.gain - a.gain);
-  const pick = el('select', { class: 'sel', 'aria-label': 'Article', onchange: (e) => drawOne(e.target.value) }, changed.map((s) => el('option', { value: s.code }, `${s.name} (${fmt.pct(s.chg)})`)));
+  const pick = el('select', { class: 'sel', 'aria-label': 'Article', onchange: (e) => drawOne(e.target.value) }, changed.map((s) => el('option', { value: s.code }, `${s.group} › ${s.sub} › ${s.sd} › ${s.name} (${fmt.pct(s.chg)})`)));
   function drawOne(code) { loadWeeklySku().then(() => { const w = WSKU.skus[code]; if (!w) return; lineChart(one, { dates: WSKU.weeks.slice(0, w.now.length).map((d) => new Date(d)), yfmt: (v) => fmt.n(v),
     series: [{ name: 'Today’s price', values: w.now, color: 'var(--plum-200)' }, { name: 'New price', values: w.new, color: 'var(--plum)', width: 2.4 }], band: { lo: w.low, hi: w.high, color: 'var(--plum-50)', name: 'Cautious – optimistic' } }); }); }
   later(() => drawOne(changed[0].code));
@@ -409,7 +737,7 @@ V.rules = () => {
   const R = { rule: '' };
   const flagged = SKUS.filter((s) => FLAGS[s.code] && s.chg);
   const table = dataTable({ rows: flagged, sort: { k: 'gain', dir: -1 }, onRow: (r) => openSku(r.code), pageSize: 50, cols: [
-    { h: 'Article', key: 'name', f: (r) => el('div', {}, el('div', { class: 'name' }, r.name), el('div', { class: 'muted' }, r.code)) }, { h: 'Change', key: 'chg', num: 1, f: (r) => chgPill(r.chg) },
+    { h: 'Article', key: 'name', f: artCell }, { h: 'Change', key: 'chg', num: 1, f: (r) => chgPill(r.chg) },
     { h: 'Flags', f: (r) => el('div', { class: 'chips' }, FLAGS[r.code].map(([k, v]) => pill(k.replace(/^R\d+ /, ''), v === 'FAIL' ? 'bad' : 'warn'))) }, { h: 'Gain', key: 'gain', num: 1, f: (r) => fmt.usdSigned(r.gain) }, { h: 'Wave', key: 'wave' }] });
   const chips = el('div', { class: 'chips' });
   const setRule = (r) => { R.rule = r; chips.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-pressed', String(c.dataset.r === r))); table.update(flagged.filter((s) => !r || FLAGS[s.code].some(([k]) => k === r))); };
@@ -436,7 +764,7 @@ V.stockouts = () => {
         el('li', {}, el('div', {}, el('b', {}, 'Realistic forecast'), el('span', {}, 'The forecast stays on what can really be sold with today’s supply.'))),
         el('li', {}, el('div', {}, el('b', {}, 'For the supply team'), el('span', {}, 'The lost sales below are worth more than many price moves.')))))),
     card('Articles losing most sales', 'Click an article for its detail', dataTable({ rows: M.stock_skus, onRow: (r) => openSku(String(r.Code)), cols: [
-      { h: 'Article', f: (r) => el('div', {}, el('div', { class: 'name' }, r.Name), el('div', { class: 'muted' }, `${r.Code} · ${r.MainGroup}`)) }, { h: 'Out-of-stock weeks', num: 1, f: (r) => fmt.pct(r['Stock-out_weeks_%'], 1, false) },
+      { h: 'Article', f: (r) => artCellRaw(r.Code, r.Name) }, { h: 'Out-of-stock weeks', num: 1, f: (r) => fmt.pct(r['Stock-out_weeks_%'], 1, false) },
       { h: 'Units lost', num: 1, f: (r) => fmt.pct(r['Lost_units_%'], 1, false) }, { h: 'Lost sales', num: 1, f: (r) => el('b', {}, fmt.usd(r.Lost_sales_USD)) }, { h: 'Lost gross profit', num: 1, f: (r) => fmt.usd(r.Lost_GP_net_USD) }] }))];
 };
 
@@ -466,7 +794,7 @@ V.portfolio = () => {
   later(() => {
     const pts = SKUS.filter((s) => s.rev > 0 && s.m_now != null && s.shelf); const box = scat; box.replaceChildren(); const h = 380; const { w } = measure(box, h); const m = { t: 10, r: 14, b: 34, l: 50 };
     const x = d3.scaleLog().domain(d3.extent(pts, (s) => s.rev)).range([m.l, w - m.r]).nice(); const y = d3.scaleLinear().domain([-30, 60]).range([h - m.b, m.t]);
-    const segs = seg.map((s) => s.k); const col = d3.scaleOrdinal(segs, ['#3B0A45', '#A08700', '#8D6797', '#2F7A8A', '#D9822B', '#C9B6D2', '#B23A3A']);
+    const segs = seg.map((s) => s.k); const col = d3.scaleOrdinal(segs, ['#3F7A1C', '#235787', '#72BD44', '#F28C28', '#8A8F86', '#B9DDA1', '#B23A3A']);
     const svg = d3.select(box).append('svg').attr('width', w).attr('height', h).attr('role', 'img').attr('aria-label', 'Revenue against margin, articles on the shelf');
     svg.append('g').attr('class', 'gridl').attr('transform', `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(6).tickSize(-(w - m.l - m.r)).tickFormat(''));
     svg.append('g').attr('class', 'ax').attr('transform', `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(6).tickFormat((v) => v + '%').tickSize(0)).call((g) => g.select('.domain').remove()).selectAll('text').attr('dx', -6);
@@ -518,7 +846,7 @@ function render() {
   const id = V[location.hash.slice(1)] ? location.hash.slice(1) : 'overview';
   document.querySelectorAll('.nav-btn').forEach((b) => b.setAttribute('aria-current', b.dataset.page === id ? 'page' : 'false'));
   $('#crumb').textContent = TITLES[id];
-  const c = $('#content'); c.replaceChildren(...V[id]()); window.scrollTo(0, 0); $('.side').classList.remove('open');
+  const c = $('#content'); c.replaceChildren(...V[id]().filter(Boolean)); window.scrollTo(0, 0); $('.side').classList.remove('open');
 }
 let rT; addEventListener('resize', () => { clearTimeout(rT); rT = setTimeout(render, 180); });
 addEventListener('hashchange', render);
@@ -528,7 +856,7 @@ const gs = $('#gsearch'), gr = $('#gresults'); let gsel = 0, gm = [];
 function gdraw() { const q = gs.value.trim().toLowerCase(); if (!q) { gr.hidden = true; return; }
   gm = SKUS.filter((s) => s.name.toLowerCase().includes(q) || s.code.includes(q)).sort((a, b) => b.rev - a.rev).slice(0, 8); gsel = Math.min(gsel, Math.max(0, gm.length - 1));
   gr.replaceChildren(...(gm.length ? gm.map((s, i) => el('button', { class: 'result', 'aria-selected': String(i === gsel), onclick: () => { openSku(s.code); gs.value = ''; gr.hidden = true; } },
-    el('span', { class: 'r-name' }, s.name), el('span', { class: 'r-sub' }, `${s.code} · ${s.group} · ${s.wave}`), el('span', { class: 'r-chg' }, chgPill(s.chg)))) : [el('div', { class: 'note', style: 'padding:10px' }, 'No article matches')]));
+    el('span', { class: 'r-name' }, s.name), el('span', { class: 'r-sub' }, `${s.group} › ${s.sub} › ${s.sd} · ${s.code}`), el('span', { class: 'r-chg' }, chgPill(s.chg)))) : [el('div', { class: 'note', style: 'padding:10px' }, 'No article matches')]));
   gr.hidden = false; }
 gs.addEventListener('input', () => { gsel = 0; gdraw(); });
 gs.addEventListener('keydown', (e) => { if (e.key === 'ArrowDown') { gsel = Math.min(gsel + 1, gm.length - 1); gdraw(); e.preventDefault(); } else if (e.key === 'ArrowUp') { gsel = Math.max(gsel - 1, 0); gdraw(); e.preventDefault(); }
