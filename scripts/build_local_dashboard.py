@@ -1,4 +1,4 @@
-"""Step 18 · Build the local, light-mode dashboard (dashboard/index.html) from dashboard/page.html.
+"""Step 18 · Build the old 40-SKU pilot dashboard (dashboard/pilot_studio.html; the live studio is dashboard/studio/) from dashboard/page.html.
 
 Data: run `python scripts/pilot_dashboard_data.py dashboard/data` first to refresh the JSON files.
 Serve: `python -m http.server 8050 -d dashboard`, then open http://localhost:8050
@@ -49,5 +49,5 @@ __PAGE__
 """
 
 page = (ROOT / "page.html").read_text(encoding="utf-8")
-(ROOT / "index.html").write_text(SHELL.replace("__PAGE__", page), encoding="utf-8")
-print("built", ROOT / "index.html")
+(ROOT / "pilot_studio.html").write_text(SHELL.replace("__PAGE__", page), encoding="utf-8")
+print("built", ROOT / "pilot_studio.html")

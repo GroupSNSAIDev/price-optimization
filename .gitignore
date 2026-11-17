@@ -7,6 +7,10 @@
 !dashboard/index.html
 !dashboard/page.html
 !dashboard/dash-local.js
+!dashboard/studio/
+!dashboard/studio/index.html
+!dashboard/studio/studio.css
+!dashboard/studio/studio.js
 
 # never commit
 .env
