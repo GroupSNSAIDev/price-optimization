@@ -11,8 +11,9 @@ D1  Statistical tests per SKU, 3 log-log specifications:
       S3 chain weekly series (units per selling store), HAC SE
     plus the demo's level regression (elasticity at the means), for reporting.
 D2  DerSimonian-Laird combination of S1-S3 (disagreement widens the interval).
-D3  Pooling candidates: none / SubGroup / behaviour cluster / hierarchical (SKU -> SubGroup -> MainGroup);
-    chosen on the back-test D7.
+D3  Pooling candidates: none / SubGroup / behaviour cluster / hierarchical (SKU -> SubGroup -> MainGroup), each also
+    with less pull toward the group (group spread x2), plus one chain-wide number for every SKU (reference);
+    chosen on the hold-out slope test D7b.
 D4  Rise vs cut: price above / below the store-SKU usual level (Wald test of equality); rise calibrated with the SKU's
     own price-rise events, capped at 1.5x the overall value and at -5.
 D5  Own vs SubGroup move: ln units on own-vs-group price and on the group price index -> own-only elasticity and
@@ -21,6 +22,15 @@ D6  Bounds (overall -4..-0.2, rise -5..-0.2, cut -4..-0.1), confidence High / Me
     Low -> cautious value = prior - 1 SD.
 D7  Back-test: estimated on data before 11 May 2026, scored on the lasting price steps after it
     (4 weeks after vs 4 before, vs the rest of the SubGroup); MAE of the log response, sign hit rate, 80% coverage.
+    Noisy (few events, 4-week noise SD ~0.8), so reported, not used to choose.
+D7b Hold-out slope test: each SKU's price slope re-estimated from scratch on the hold-out weeks only (same 3 specs,
+    combined); candidates fitted before the hold-out are scored on it: prediction error net of the hold-out's own
+    sampling noise (weighted), calibration slope of hold-out on predicted (1 = right size), correlation, and the
+    revenue-weighted average slope (level check). Lowest prediction error chosen.
+D7c Spread calibration: the best candidate's estimates are spread too wide (hold-out calibration slope < 1, i.e. the
+    extremes are overstated). Shrink each SKU toward the weighted mean by the hold-out slope c:
+    final = m + c (estimate - m), level kept. Scored by 2-fold cross-fitting over SKUs (fit c on half, score the other
+    half); used only when it beats the uncalibrated candidate.
 D8  Store clusters (store class A / B / C / P, wholesale HDDS): pooled elasticity per cluster and MainGroup.
 D9  Over time: pooled elasticity per MainGroup, Jan 2024 - Jun 2025 vs Jul 2025 - Nov 2026.
 
@@ -216,16 +226,17 @@ def group_prior(r, key):
     return mean, tau, n
 
 
-def pooled(r, sc, clusters):
-    """D3 candidates: dict name -> (estimate, se) per SKU"""
-    out = {"No pooling": (r.Combined.clip(-6, 2), r.Combined_SE)}
+def pooled(r, sc, clusters, tau_mult=1.0, tag=""):
+    """D3 candidates: dict name -> (estimate, se) per SKU; tau_mult > 1 = less pull toward the group mean"""
     over = np.average(r.Combined.dropna().clip(-6, 2), weights=1 / r.Combined_SE.dropna().clip(lower=SE_FLOOR) ** 2)
+    out = {} if tag else {"No pooling": (r.Combined.clip(-6, 2), r.Combined_SE),
+                          "One chain-wide number (reference)": (pd.Series(over, index=r.index), pd.Series(0.5, index=r.index))}
     for name, key in [("SubGroup", sc.SubGroup.reindex(r.index)), ("Behaviour cluster", clusters.reindex(r.index))]:
         m, t, n = group_prior(r, key)
         prior = key.map(m).fillna(over)
-        tau = key.map(t).fillna(0.5)
+        tau = key.map(t).fillna(0.5) * tau_mult
         e, s, _ = eb(r.Combined.clip(-6, 2), r.Combined_SE.clip(lower=SE_FLOOR), prior, tau)
-        out[name] = (e.fillna(prior), s.fillna(tau))
+        out[name + tag] = (e.fillna(prior), s.fillna(tau))
     # hierarchical: SubGroup means shrunk to MainGroup, then SKUs to the shrunk SubGroup
     sub, main = sc.SubGroup.reindex(r.index), sc.MainGroup.reindex(r.index)
     ms, ts, ns = group_prior(r, sub)
@@ -236,9 +247,9 @@ def pooled(r, sc, clusters):
     mt = sub_main.reindex(ms.index).map(tm).fillna(0.5)
     ms_shr, _, _ = eb(ms, sub_se, mp, mt)
     prior = sub.map(ms_shr).fillna(main.map(mm)).fillna(over)
-    tau = sub.map(ts).fillna(main.map(tm)).fillna(0.5)
+    tau = sub.map(ts).fillna(main.map(tm)).fillna(0.5) * tau_mult
     e, s, _ = eb(r.Combined.clip(-6, 2), r.Combined_SE.clip(lower=SE_FLOOR), prior, tau)
-    out["Hierarchical"] = (e.fillna(prior), s.fillna(tau))
+    out["Hierarchical" + tag] = (e.fillna(prior), s.fillna(tau))
     return out
 
 
@@ -297,6 +308,48 @@ def score(ev, est, se):
             "Coverage_80_%": float((np.abs(act - pred) <= 1.28 * psd).mean() * 100),
             "Noise_SD_4wk": float(noise),
             "Q1_pred/actual": f"{bins.p.iloc[0]:.3f}/{bins.a.iloc[0]:.3f}", "Q4_pred/actual": f"{bins.p.iloc[-1]:.3f}/{bins.a.iloc[-1]:.3f}"}
+
+
+def score_slopes(ho, est, w_rev):
+    """D7b: candidate (fitted before the hold-out) vs the SKU's slope re-estimated on the hold-out only"""
+    e = est.reindex(ho.index)
+    ok = ho.Combined.notna() & ho.Combined_SE.notna() & e.notna()
+    b, s, p = ho.Combined[ok].clip(-6, 2), ho.Combined_SE[ok].clip(lower=SE_FLOOR), e[ok]
+    w = 1 / (s ** 2 + 0.25)                              # precise SKUs count more, no single SKU dominates
+    err2 = float((w * ((b - p) ** 2 - s ** 2)).sum() / w.sum())          # net of the hold-out's own noise
+    X = np.column_stack([np.ones(len(p)), p])
+    W = w.to_numpy()
+    coef = np.linalg.solve(X.T @ (X * W[:, None]), X.T @ (W * b.to_numpy()))
+    pc, bc = p - np.average(p, weights=w), b - np.average(b, weights=w)
+    corr = float((w * pc * bc).sum() / np.sqrt((w * pc ** 2).sum() * (w * bc ** 2).sum()))
+    rv = w_rev.reindex(b.index).fillna(0)
+    return {"SKUs": int(ok.sum()), "Pred_error_RMSE": float(np.sqrt(max(err2, 0))), "Pred_error_MSE": err2,
+            "Calib_slope_hold": float(coef[1]), "Corr_hold": corr,
+            "Avg_pred_rev_wtd": float(np.average(p, weights=rv + 1e-9)), "Avg_holdout_rev_wtd": float(np.average(b, weights=rv + 1e-9))}
+
+
+def calib_fit(ho, est):
+    """weighted hold-out regression b = a + c p -> (c, weighted mean of p)"""
+    e = est.reindex(ho.index)
+    ok = ho.Combined.notna() & ho.Combined_SE.notna() & e.notna()
+    b, sd, pr = ho.Combined[ok].clip(-6, 2), ho.Combined_SE[ok].clip(lower=SE_FLOOR), e[ok]
+    w = (1 / (sd ** 2 + 0.25)).to_numpy()
+    X = np.column_stack([np.ones(len(pr)), pr])
+    coef = np.linalg.solve(X.T @ (X * w[:, None]), X.T @ (w * b.to_numpy()))
+    return float(np.clip(coef[1], 0.3, 1.0)), float(np.average(pr, weights=w)), ok
+
+
+def calib_crossfit(ho, est, w_rev):
+    """D7c score: c fitted on one half of the SKUs, applied to the other half"""
+    _, _, ok = calib_fit(ho, est)
+    codes = ho.index[ok]
+    fold = pd.Series(np.random.default_rng(SEED).integers(0, 2, len(codes)), index=codes)
+    pred = pd.Series(np.nan, index=est.index)
+    for k in (0, 1):
+        c, m, _ = calib_fit(ho.loc[fold.index[fold != k]], est)
+        idx = fold.index[fold == k]
+        pred[idx] = m + c * (est[idx] - m)
+    return score_slopes(ho, pred, w_rev)
 
 
 def behaviour_clusters(bh):
@@ -366,6 +419,7 @@ def main():
     r_bt = combine(run(d[d.Week < HOLD_START]))
     clusters = behaviour_clusters(bh)
     cand_bt = pooled(r_bt, sc, clusters)
+    cand_bt.update(pooled(r_bt, sc, clusters, tau_mult=2.0, tag=", less pull"))
     shift_bt = recency_shift(d[d.Week < HOLD_START], sc)
     e_h, s_h = cand_bt["Hierarchical"]
     cand_bt["Hierarchical + recent-period shift"] = (e_h + sc.MainGroup.reindex(e_h.index).map(shift_bt).fillna(0), s_h)
@@ -375,19 +429,35 @@ def main():
     p1 = pd.read_parquet(ROOT / "analysis" / "article_elasticity.parquet", columns=["ArticleCode", "Elasticity"])
     p1.index = p1.ArticleCode.astype(str).str.lstrip("0")
     bt.loc["Phase 1 estimate (reference)"] = score(ev, p1.Elasticity, pd.Series(0.3, index=p1.index))
-    bt["Rank"] = bt.MAE_log.astype(float).rank() + (bt.Calib_slope.astype(float) - 1).abs().rank()
-    choice = bt.drop(index="Phase 1 estimate (reference)").Rank.idxmin()
-    print(bt.round(3).to_string(), "\nchosen:", choice, flush=True)
+    print(bt.round(3).to_string(), flush=True)
+    # D7b hold-out slope test (choice)
+    r_ho = combine(run(d[d.Week >= HOLD_START]))
+    hs = pd.DataFrame({k: score_slopes(r_ho, e, sc.Revenue_USD) for k, (e, s) in cand_bt.items()}).T
+    hs.loc["Phase 1 estimate (reference)"] = score_slopes(r_ho, p1.Elasticity, sc.Revenue_USD)
+    refs = ["Phase 1 estimate (reference)", "One chain-wide number (reference)"]
+    choice = hs.drop(index=refs).Pred_error_MSE.astype(float).idxmin()
+    calib_row = f"{choice}, spread calibrated (cross-fitted)"
+    hs.loc[calib_row] = calib_crossfit(r_ho, cand_bt[choice][0], sc.Revenue_USD)
+    use_calib = hs.loc[calib_row, "Pred_error_MSE"] < hs.loc[choice, "Pred_error_MSE"]
+    calib_c, _, ok_c = calib_fit(r_ho, cand_bt[choice][0])
+    print(hs.round(3).to_string(), "\nchosen:", choice, "| spread calibration:", f"c={calib_c:.2f}" if use_calib else "not used", flush=True)
 
     # ---- full-data estimation
     r = combine(run(d))
     cand = pooled(r, sc, clusters)
+    cand.update(pooled(r, sc, clusters, tau_mult=2.0, tag=", less pull"))
     shift = recency_shift(d, sc)
     e_h, s_h = cand["Hierarchical"]
     cand["Hierarchical + recent-period shift"] = (e_h + sc.MainGroup.reindex(e_h.index).map(shift).fillna(0), s_h)
     r["Pooled"], r["Pooled_SE"] = cand[choice]
+    r["Pooled_Uncalibrated"] = r.Pooled
+    if use_calib:
+        w_m = 1 / (r_ho.Combined_SE[ok_c].clip(lower=SE_FLOOR) ** 2 + 0.25)
+        m_full = float(np.average(r.Pooled.reindex(w_m.index).fillna(r.Pooled.mean()), weights=w_m))
+        r["Pooled"] = m_full + calib_c * (r.Pooled - m_full)
+        r["Pooled_SE"] = r.Pooled_SE * calib_c
     for k, (e, s) in cand.items():
-        r[f"Cand_{k.replace(' ', '_')}"] = e
+        r[f"Cand_{k.replace(' ', '_').replace(',', '').replace('(', '').replace(')', '')}"] = e
     r = r.reindex(sc.index)
     # SKUs with no own estimate: pooled prior only
     r["Measured"] = r.Combined.notna()
@@ -447,7 +517,7 @@ def main():
     # ---- outputs
     keep = ["Rows", "Stores", "Weeks", "Price_SD", "Price_Steps", "S1", "S1_SE", "S2", "S2_SE", "S3", "S3_SE", "Level", "Combined",
             "Combined_SE", "Tau2"] + [c for c in r.columns if c.startswith("Cand_")] + [
-            "Pooled", "Pooled_SE", "CI_Low", "CI_High", "Elasticity", "Rise", "Cut", "Cut_Reliable", "Rise_Reg", "Cut_Reg", "Asym_p",
+            "Pooled_Uncalibrated", "Pooled", "Pooled_SE", "CI_Low", "CI_High", "Elasticity", "Rise", "Cut", "Cut_Reliable", "Rise_Reg", "Cut_Reg", "Asym_p",
             "Rise_Events", "Rise_Events_N", "Own_Only_Final", "Group_Move_Final", "Diversion", "Confidence", "Cautious", "Measured",
             "Behaviour_Cluster"]
     out = r[keep].join(sc[["Name", "MainGroup", "SubGroup", "Segment", "ABC", "Insight", "in_scope", "Revenue_USD"]])
@@ -464,11 +534,13 @@ def main():
                                 int((r.Diversion > 0.2).sum())]})
     with pd.ExcelWriter(OUT / "elasticity.xlsx") as xw:
         pd.DataFrame({"Item": ["Panel rows", "SKUs with own estimate", "SKUs pooled only", "Hold-out start", "Hold-out price steps scored",
-                               "Pooling chosen (D3/D7)"],
-                      "Value": [len(d), int(out.Measured.sum()), int((~out.Measured).sum()), str(HOLD_START.date()), len(ev), choice]}
+                               "SKUs in the hold-out slope test", "Pooling chosen (D3/D7b)", "Spread calibration c (D7c)"],
+                      "Value": [len(d), int(out.Measured.sum()), int((~out.Measured).sum()), str(HOLD_START.date()), len(ev),
+                                int(hs.loc[choice, "SKUs"]), choice, round(calib_c, 3) if use_calib else "not used"]}
                      ).to_excel(xw, sheet_name="Summary", index=False)
         t1.to_excel(xw, sheet_name="D1 tests", index=False)
         bt.round(3).to_excel(xw, sheet_name="D3-D7 back-test")
+        hs.round(3).to_excel(xw, sheet_name="D7b hold-out slope test")
         bands.round(2).to_excel(xw, sheet_name="Bands"); conf.round(1).to_excel(xw, sheet_name="Confidence")
         st.round(3).to_excel(xw, sheet_name="D8 store clusters", index=False); st_all.round(3).to_excel(xw, sheet_name="D8 all", index=False)
         tmw.round(3).to_excel(xw, sheet_name="D9 over time"); tm_all.round(3).to_excel(xw, sheet_name="D9 all", index=False)
