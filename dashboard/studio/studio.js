@@ -504,7 +504,7 @@ function parseForecast(text) {
 V.forecast = () => {
   const t = FC.t; const out = el('div', { style: 'display:grid;gap:18px' });
   const chart = el('div', { class: 'chart' });
-  const seg = el('div', { class: 'seg' }, ['current', 'upload'].map((k) => el('button', { 'aria-pressed': String(FC.source === k), onclick: () => { FC.source = k; render(); } }, k === 'current' ? 'Use the current forecast' : 'Upload my forecast')));
+  const seg = el('div', { class: 'seg' }, ['current', 'upload'].map((k) => el('button', { 'aria-pressed': String(FC.source === k), onclick: () => { FC.source = k; flowChanged('forecast'); render(); } }, k === 'current' ? 'Use the current forecast' : 'Upload my forecast')));
   const fcCard = el('section', { class: 'card' }, el('div', { class: 'card-head' }, el('div', {}, el('h2', {}, 'Forecast'), el('p', { class: 'sub' }, 'Units each article will sell in the next 52 weeks at today’s price')), seg));
   if (FC.source === 'current') {
     fcCard.append(el('div', { class: 'banner info' }, `Our forecast: ${fmt.n(SKUS.filter((s) => s.units > 0).length)} articles, a blend of machine learning and the seasonal path (weekly error about ${fmt.pct(M.forecast[0].Mean_WAPE_week, 0, false)}, 13-week error ${fmt.pct(M.forecast[0].Mean_WAPE_13w, 0, false)}).`), chart);
@@ -515,7 +515,7 @@ V.forecast = () => {
       ondrop: (e) => { e.preventDefault(); drop.classList.remove('over'); readFile(e.dataTransfer.files[0]); } },
       el('b', {}, 'Drop a CSV here or click to choose'), el('div', { class: 'note', style: 'margin-top:6px' }, 'Columns: SKU_Code and Units_52w (one row per article), or SKU_Code, Week_Start and Units (weekly rows, added up). Same units as the template.'));
     const tmpl = el('button', { class: 'btn', onclick: () => csvDownload('fresmart_forecast_template.csv', [['SKU_Code', 'code'], ['Article', 'name'], ['MainGroup', 'group'], ['SubGroup', 'sub'], ['ShortDesc', 'sd'], ['Units_52w', (r) => Math.round(r.units)]], SKUS.filter((s) => s.shelf && s.units > 0)) }, '↓ Template with our forecast');
-    fcCard.append(drop, file, el('div', { class: 'toolbar' }, tmpl, FC.upload ? el('button', { class: 'btn', onclick: () => { FC.upload = null; FC.info = null; render(); } }, 'Clear upload') : null));
+    fcCard.append(drop, file, el('div', { class: 'toolbar' }, tmpl, FC.upload ? el('button', { class: 'btn', onclick: () => { FC.upload = null; FC.info = null; flowChanged('forecast'); render(); } }, 'Clear upload') : null));
     if (FC.info) { const i = FC.info;
       fcCard.append(el('div', { class: 'banner ' + (i.matched ? 'ok' : 'warn') }, `${i.name}: ${fmt.n(i.rows)} rows, ${fmt.n(i.matched)} articles matched, ${fmt.n(i.unmatched)} codes not found${i.bad ? `, ${fmt.n(i.bad)} rows unreadable` : ''}. Matched articles: ${fmt.n(i.theirs)} units vs ${fmt.n(i.ours)} in our forecast (${fmt.pct((i.theirs / i.ours - 1) * 100)}).`));
       if (i.diff.length) fcCard.append(dataTable({ rows: i.diff, cols: [{ h: 'Article', f: (r) => artCell(r.s) }, { h: 'Our forecast', num: 1, f: (r) => fmt.n(r.ours) }, { h: 'Yours', num: 1, f: (r) => fmt.n(r.theirs) }, { h: 'Difference', num: 1, f: (r) => fmt.pct((r.theirs / r.ours - 1) * 100) }] })); }
@@ -525,15 +525,15 @@ V.forecast = () => {
       p.map.forEach((u, c) => { if (BY_CODE.has(c)) m.set(c, u); else unmatched++; });
       const diff = [...m.entries()].map(([c, u]) => ({ s: BY_CODE.get(c), ours: BY_CODE.get(c).units, theirs: u })).filter((r) => r.ours > 0).sort((a, b) => Math.abs(b.theirs - b.ours) - Math.abs(a.theirs - a.ours)).slice(0, 10);
       FC.upload = m; FC.error = null; FC.info = { name: f.name, rows: p.rows, bad: p.bad, matched: m.size, unmatched, theirs: d3.sum([...m.entries()].filter(([c]) => BY_CODE.get(c).units > 0), ([, u]) => u), ours: d3.sum([...m.keys()], (c) => BY_CODE.get(c).units || 0) || 1, diff };
-    } catch (e) { FC.error = `Could not read ${f.name}: ${e.message}.`; } render(); }; rd.readAsText(f); }
-  const num = (key, label, hint, step = 1) => el('label', { class: 'field' }, label, el('input', { class: 'inp', type: 'number', step, min: 0, value: t[key], oninput: (e) => { t[key] = e.target.value === '' ? '' : +e.target.value; store.set('target', t); } }), el('span', { class: 'hint' }, hint));
-  const chk = (key, label) => el('label', { class: 'check' }, el('input', { type: 'checkbox', checked: t[key] || null, onchange: (e) => { t[key] = e.target.checked; store.set('target', t); } }), label);
+    } catch (e) { FC.error = `Could not read ${f.name}: ${e.message}.`; } flowChanged('forecast'); render(); }; rd.readAsText(f); }
+  const num = (key, label, hint, step = 1) => el('label', { class: 'field' }, label, el('input', { class: 'inp', type: 'number', step, min: 0, value: t[key], oninput: (e) => { t[key] = e.target.value === '' ? '' : +e.target.value; store.set('target', t); flowChanged('forecast'); } }), el('span', { class: 'hint' }, hint));
+  const chk = (key, label) => el('label', { class: 'check' }, el('input', { type: 'checkbox', checked: t[key] || null, onchange: (e) => { t[key] = e.target.checked; store.set('target', t); flowChanged('forecast'); } }), label);
   const tgCard = el('section', { class: 'card' }, el('div', { class: 'card-head' }, el('div', {}, el('h2', {}, 'Target and limits'), el('p', { class: 'sub' }, 'Set the profit you want and the limits; leave the target empty to get the most profit within the limits'))),
-    el('div', { class: 'form-grid' }, el('label', { class: 'field' }, 'Profit gain target, US$ per year', el('input', { class: 'inp', type: 'number', step: 50000, min: 0, placeholder: 'e.g. 1500000', value: t.target, oninput: (e) => { t.target = e.target.value; store.set('target', t); } }), el('span', { class: 'hint' }, `the official plan gains ${fmt.usd(M.plan.gain)}`)),
+    el('div', { class: 'form-grid' }, el('label', { class: 'field' }, 'Profit gain target, US$ per year', el('input', { class: 'inp', type: 'number', step: 50000, min: 0, placeholder: 'e.g. 1500000', value: t.target, oninput: (e) => { t.target = e.target.value; store.set('target', t); flowChanged('forecast'); } }), el('span', { class: 'hint' }, `the official plan gains ${fmt.usd(M.plan.gain)}`)),
       num('maxRise', 'Biggest price rise, %', 'any article'), num('lowRise', 'Biggest rise, low-confidence articles, %', 'less evidence, smaller steps'), num('unitCap', 'Most units an article may lose, %', 'per article, likely case'),
       num('basket', 'Basket rise cap, %', 'sales-weighted, all articles', 0.1)),
     el('div', { class: 'toolbar' }, chk('holdKvi', 'Hold everyday KVIs (112 articles)'), chk('cuts', 'Allow price cuts'),
-      el('button', { class: 'btn primary', style: 'margin-left:auto', onclick: () => { FC.result = planWith(t, FC.source === 'upload' ? FC.upload : null); render(); } }, 'Build my plan')));
+      el('button', { class: 'btn primary', style: 'margin-left:auto', onclick: () => { FC.result = planWith(t, FC.source === 'upload' ? FC.upload : null); flowChanged('forecast'); FC.stale = false; render(); } }, 'Build my plan')));
   out.append(fcCard, tgCard);
   if (FC.result) { const r = FC.result;
     out.append(el('section', { class: 'card' }, el('div', { class: 'card-head' }, el('div', {}, el('h2', {}, 'Your plan'), el('p', { class: 'sub' }, `${r.source === 'upload' ? 'Your uploaded forecast' : 'Current forecast'} · rises ≤ ${r.t.maxRise}% (low confidence ≤ ${r.t.lowRise}%) · units ≤ −${r.t.unitCap}% · basket ≤ ${r.t.basket}%`)),
@@ -562,7 +562,7 @@ function promoCalc(s, disc, weeks) {
 }
 V.promos = () => {
   const out = el('div', { style: 'display:grid;gap:18px' });
-  const save = () => store.set('promo', PROMO);
+  const save = () => { store.set('promo', PROMO); flowChanged('promos'); };
   const add = (codes) => { codes.forEach((c) => { if (!PROMO.items.some((i) => i.code === c)) PROMO.items.push({ code: c, disc: PROMO.disc, weeks: PROMO.weeks }); }); save(); render(); };
   const pick = el('section', { class: 'card' }); out.append(pick);
   function drawPick() {
@@ -840,17 +840,50 @@ V.method = () => {
 function buildNav() {
   const nav = $('#nav');
   nav.replaceChildren(...PAGES.map(([g, ps]) => el('div', { class: 'nav-group' }, el('div', { class: 'nav-label' }, g),
-    ps.map(([id, t, ic]) => { const b = el('button', { class: 'nav-btn', 'data-page': id, onclick: () => go(id) }, svgIcon(ic), t);
-      if (id === 'prices') b.append(el('span', { class: 'nav-count' }, fmt.n(M.plan.rises)));
+    ps.map(([id, t, ic]) => { const lk = locked(id); const b = el('button', { class: 'nav-btn' + (lk ? ' locked' : ''), 'data-page': id, 'aria-disabled': lk ? 'true' : null, title: lk ? 'Opens after the step before is confirmed' : null, onclick: () => go(id) }, svgIcon(ic), t);
+      if (FLOW.includes(id)) b.append(el('span', { class: 'nav-flow' + (DONE.includes(id) ? ' done' : '') }, DONE.includes(id) ? '✓' : lk ? '🔒' : String(FLOW.indexOf(id) + 1)));
+      if (id === 'prices' && !lk) b.append(el('span', { class: 'nav-count' }, fmt.n(M.plan.rises)));
       if (id === 'rules') b.append(el('span', { class: 'nav-count' }, fmt.n(M.plan.flagged)));
       return b; }))));
 }
-function go(id) { if (!V[id]) id = 'overview'; location.hash = id; }
+// guided flow: the pricing steps open one at a time, each after the one before is confirmed
+const FLOW = PAGES[0][1].map(([id]) => id);
+let DONE = store.get('flow', []).filter((id) => FLOW.includes(id)), NOTICE = '';
+const flowOpen = () => { const i = FLOW.findIndex((id) => !DONE.includes(id)); return i < 0 ? FLOW.length - 1 : i; };   // last step that can be opened
+const locked = (id) => FLOW.includes(id) && FLOW.indexOf(id) > flowOpen();
+function flowSave() { store.set('flow', DONE); buildNav(); }
+/* a change on a confirmed step un-confirms it and every step after it */
+function flowChanged(id) { if (id === 'forecast') FC.stale = true; if (!DONE.includes(id)) return; DONE = DONE.filter((d) => FLOW.indexOf(d) < FLOW.indexOf(id)); flowSave(); }
+const FLOW_NEED = {
+  forecast: () => !FC.result ? 'Build your plan first: choose the forecast, set the target and press Build my plan.' : FC.stale ? 'You changed the forecast or a limit: press Build my plan again first.' : '',
+};
+function confirmStep(id) { const need = FLOW_NEED[id] && FLOW_NEED[id](); if (need) { NOTICE = need; render(); return; }
+  if (!DONE.includes(id)) DONE.push(id); flowSave(); const i = FLOW.indexOf(id); if (i < FLOW.length - 1) go(FLOW[i + 1]); else render(); }
+function flowReset() { DONE = []; flowSave(); go('overview'); }
+function flowBar(id) {
+  const i = FLOW.indexOf(id); const all = DONE.length === FLOW.length;
+  return el('div', { class: 'flow-bar' }, el('div', { class: 'flow-steps' }, FLOW.map((f, j) => el('button', { class: 'flow-step' + (DONE.includes(f) ? ' done' : '') + (f === id ? ' cur' : ''), disabled: locked(f) || null,
+      title: locked(f) ? 'Confirm the steps before to open this' : TITLES[f], onclick: () => go(f) }, el('span', { class: 'flow-n' }, DONE.includes(f) ? '✓' : locked(f) ? '🔒' : String(j + 1)), el('span', { class: 'flow-t' }, TITLES[f])))),
+    el('div', { class: 'flow-meta' }, all ? 'All 8 steps confirmed' : `Step ${i + 1} of ${FLOW.length}`, DONE.length ? el('button', { class: 'linkbtn', onclick: () => { if (confirm('Lock all steps again and start from the Overview?')) flowReset(); } }, 'Start again') : null));
+}
+function flowFoot(id) {
+  const i = FLOW.indexOf(id), done = DONE.includes(id), last = i === FLOW.length - 1;
+  const label = id === 'promos' && !PROMO.items.length ? 'No promotion, continue →' : last ? 'Confirm and finish ✓' : `Confirm and continue to ${TITLES[FLOW[i + 1]]} →`;
+  return el('div', { class: 'flow-foot' + (done ? ' done' : '') },
+    i > 0 ? el('button', { class: 'btn', onclick: () => go(FLOW[i - 1]) }, `← ${TITLES[FLOW[i - 1]]}`) : el('span'),
+    el('div', { class: 'flow-foot-r' }, done ? el('span', { class: 'flow-ok' }, '✓ Confirmed') : el('span', { class: 'note' }, last ? 'Confirm to finish the pricing steps' : `Confirm this step to open ${TITLES[FLOW[i + 1]]}`),
+      done && !last ? el('button', { class: 'btn primary', onclick: () => go(FLOW[i + 1]) }, `${TITLES[FLOW[i + 1]]} →`) : done ? null : el('button', { class: 'btn primary', onclick: () => confirmStep(id) }, label)));
+}
+function go(id) { if (!V[id]) id = 'overview'; if (locked(id)) { NOTICE = `${TITLES[id]} opens after you confirm ${TITLES[FLOW[flowOpen()]]}.`; id = FLOW[flowOpen()]; }
+  if (location.hash === '#' + id) render(); else location.hash = id; }
 function render() {
-  const id = V[location.hash.slice(1)] ? location.hash.slice(1) : 'overview';
+  let id = V[location.hash.slice(1)] ? location.hash.slice(1) : 'overview';
+  if (locked(id)) { NOTICE = NOTICE || `${TITLES[id]} opens after you confirm ${TITLES[FLOW[flowOpen()]]}.`; id = FLOW[flowOpen()]; history.replaceState(null, '', '#' + id); }
   document.querySelectorAll('.nav-btn').forEach((b) => b.setAttribute('aria-current', b.dataset.page === id ? 'page' : 'false'));
   $('#crumb').textContent = TITLES[id];
-  const c = $('#content'); c.replaceChildren(...V[id]().filter(Boolean)); window.scrollTo(0, 0); $('.side').classList.remove('open');
+  const c = $('#content'); const kids = V[id]().filter(Boolean);
+  if (FLOW.includes(id)) { kids.unshift(flowBar(id)); if (NOTICE) kids.splice(1, 0, el('div', { class: 'banner warn' }, NOTICE)); kids.push(flowFoot(id)); }
+  NOTICE = ''; c.replaceChildren(...kids); window.scrollTo(0, 0); $('.side').classList.remove('open');
 }
 let rT; addEventListener('resize', () => { clearTimeout(rT); rT = setTimeout(render, 180); });
 addEventListener('hashchange', render);
