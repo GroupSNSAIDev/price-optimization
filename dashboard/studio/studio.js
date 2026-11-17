@@ -301,7 +301,7 @@ const inSel = (s, st = SEL) => (!st.group || s.group === st.group) && (!st.sub |
 function hierFilter(st, onChange, { article = false, pool = SKUS } = {}) {
   const sel = (label, key, opts, all) => el('label', {}, label, el('select', { class: 'sel', onchange: (e) => { st[key] = e.target.value;
       const order = ['group', 'sub', 'sd', 'code']; order.slice(order.indexOf(key) + 1).forEach((k) => { st[k] = ''; }); store.set('sel', SEL); onChange(); } },
-    el('option', { value: '' }, all), opts.map((o) => el('option', { value: o[0] ?? o, selected: (o[0] ?? o) === st[key] || null }, o[1] ?? o))));
+    el('option', { value: '' }, all), opts.map((o) => { const [v, t] = Array.isArray(o) ? o : [o, o]; return el('option', { value: v, selected: v === st[key] || null }, t); })));
   const g = pool, gs = uniq(g.map((s) => s.group));
   const subs = uniq(g.filter((s) => !st.group || s.group === st.group).map((s) => s.sub));
   const sds = uniq(g.filter((s) => (!st.group || s.group === st.group) && (!st.sub || s.sub === st.sub)).map((s) => s.sd));
@@ -367,6 +367,10 @@ function todayArticle(s) {
     const d = h && h.skus[s.code];
     if (!d) { priceBox.append(el('p', { class: 'empty' }, 'No price history for this article.')); return; }
     const dates = h.weeks.map((w) => new Date(w));
+    // one-week data glitches (a cost or price far off its usual level) would flatten the chart: blank them
+    const med = (a) => d3.median(a.filter((v) => v != null && v > 0));
+    const clean = (a) => { const m = med(a); return a.map((v) => (v != null && m && (v > 3 * m || v < m / 3)) ? null : v); };
+    d.reg = clean(d.reg); d.sell = clean(d.sell); d.cost = clean(d.cost);
     lineChart(priceBox, { dates, h: 300, yfmt: (v) => fmt.n(v), series: [{ name: 'Regular shelf price', values: d.reg, color: 'var(--plum)', width: 2.4 },
       { name: 'Price paid', values: d.sell, color: 'var(--navy)', width: 1.4 }, { name: 'Cost with IVA', values: d.cost, color: 'var(--gold-400)', width: 1.6, dash: '4 3' }] });
     lineChart(unitBox, { dates, h: 200, yfmt: (v) => fmt.n(v), series: [{ name: 'Units', values: d.units, color: 'var(--plum-400)', width: 1.6 }] });
@@ -874,6 +878,8 @@ Promise.all(['meta', 'skus', 'weekly', 'flags'].map((n) => fetch(`data/${n}.json
     const fail = M.checks.filter((c) => c.Result === 'FAIL').length;
     $('#side-status').className = 'status' + (fail || M.plan.fails ? ' bad' : '');
     $('#side-status').lastChild.textContent = fail ? `${fail} checks failing` : M.plan.fails ? `${M.plan.fails} rule failures` : 'Plan checked · ready for review';
+    const art = new URLSearchParams(location.search).get('article'); const sa = art && BY_CODE.get(art);   // ?article=<code> selects it on Today's price / elasticity
+    if (sa) Object.assign(SEL, { group: sa.group, sub: sa.sub, sd: sa.sd, code: sa.code });
     buildNav(); render();
     const deep = new URLSearchParams(location.search).get('sku'); if (deep) openSku(deep);   // ?sku=<code> opens an article
   })
