@@ -5,8 +5,6 @@
 !scripts/*.py
 !analysis/**/*.md
 !dashboard/index.html
-!dashboard/page.html
-!dashboard/dash-local.js
 !dashboard/studio/
 !dashboard/studio/index.html
 !dashboard/studio/studio.css
