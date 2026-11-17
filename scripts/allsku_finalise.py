@@ -10,8 +10,13 @@ H3  Business rules check against the A2 catalogue (R1-R20; ladders / price lines
 H4  Plain-language reason per SKU.
 H5  Waves: Wave 1 (High / Medium confidence, rise <= 8%), Review (Low confidence, big moves, rule flags), Test (Danger zone
     rises, chicken legs), Hold; label changes per store per wave.
-H7  Holdout stores: matched retail store pairs (volume, different zone); control stores keep old prices;
-    minimum detectable change in GP (net of IVA), units and sales over 4-16 weeks from placebo runs, vs the expected change.
+H7  Holdout stores: a small control group keeps old prices, every other retail store changes. Sizes 6-30 tested:
+    control groups drawn stratified by store sales (one per sales band, zones mixed), placebo runs on past weeks give
+    the noise of the changed-vs-control difference-in-differences (pooled ratio of sums) for GP (net of IVA), units and
+    sales over 4-16 weeks. Smallest size whose 4-week minimum detectable GP change (2.8 x noise SD) is at most half
+    the expected GP change (so even half the planned effect shows). The control stores: best pre-period match of
+    500 stratified draws (lowest week-to-week tracking error over the last 26 weeks). Gain given up = the control
+    stores' share of the changed SKUs' sales x plan gain x 8 test weeks.
 H8  Rollback rules: pause / roll back limits per wave and SKU, set from the same placebo noise.
 H6  Impact for any date window from the weekly 52-week table: --start / --end.
 
@@ -65,9 +70,9 @@ def own_gp(r, d):
     return u * (r.P * (1 + d) - r.C), u
 
 
-def holdout(changed, expected):
-    """matched retail store pairs on the SKUs that change; placebo minimum detectable change for GP (net of IVA), units
-    and sales over 4-16 weeks, compared with the change the plan expects; rollback limits from the same placebo noise"""
+def holdout(changed, expected, gain_52w):
+    """small control group vs all other retail stores on the SKUs that change; size chosen on placebo power; rollback
+    limits from the same placebo noise"""
     w = pd.read_parquet(CL / "model_weekly.parquet", columns=["Week", "Plant", "Code", "Qty_Clean", "Sales_KZ", "KZ_COGS", "Channel", "Area_Zone"])
     w = w[w.Code.isin(changed) & (w.Channel == "STORE")]
     iva = pd.read_parquet(CL / "iva_by_sku.parquet").set_index("Code").IVA_Pct
@@ -78,53 +83,90 @@ def holdout(changed, expected):
     recent = s.loc[:, s.columns > end - pd.Timedelta(weeks=13)]
     info = pd.DataFrame({"Weekly_Sales_13w": recent.mean(axis=1), "Zone": w.drop_duplicates("Plant").set_index("Plant").Area_Zone})
     info = info[(recent > 0).sum(axis=1) >= 12].sort_values("Weekly_Sales_13w")
+    stores = info.index.to_numpy()
     rng = np.random.default_rng(SEED)
-    pairs, ids = [], list(info.index)
-    while len(ids) >= 2:
-        a = ids.pop(0)
-        cand = ids[:4]
-        other = [c for c in cand if info.at[c, "Zone"] != info.at[a, "Zone"]]
-        b = other[0] if other else cand[0]
-        ids.remove(b)
-        t, c = (a, b) if rng.random() < 0.5 else (b, a)
-        pairs.append({"Pair": len(pairs) + 1, "Changed_Store": t, "Holdout_Store": c, "Changed_Zone": info.at[t, "Zone"],
-                      "Holdout_Zone": info.at[c, "Zone"], "Changed_Weekly_Sales_$": info.at[t, "Weekly_Sales_13w"] / FX,
-                      "Holdout_Weekly_Sales_$": info.at[c, "Weekly_Sales_13w"] / FX})
-    pairs = pd.DataFrame(pairs)
+
+    def draw(k):
+        """one store per sales band (k bands), zones mixed where possible"""
+        bands = np.array_split(stores, k)
+        pick, zones = [], set()
+        for b in bands:
+            b = rng.permutation(b)
+            new_zone = [x for x in b if info.at[x, "Zone"] not in zones]
+            x = new_zone[0] if new_zone else b[0]
+            pick.append(x); zones.add(info.at[x, "Zone"])
+        return np.array(pick)
+
     weeks = [c for c in s.columns if pd.Timestamp("2025-06-02") <= c <= end - pd.Timedelta(weeks=16)]
-    tr, ct = pairs.Changed_Store.to_numpy(), pairs.Holdout_Store.to_numpy()
-    power = []
+    windows = {}
     for metric, t in tabs.items():
+        t = t.reindex(stores)
         for n in (4, 8, 12, 16):
+            pre = np.column_stack([t.loc[:, (t.columns >= s0 - pd.Timedelta(weeks=8)) & (t.columns < s0)].sum(axis=1) for s0 in weeks])
+            post = np.column_stack([t.loc[:, (t.columns >= s0) & (t.columns < s0 + pd.Timedelta(weeks=n))].sum(axis=1) * 8 / n for s0 in weeks])
+            windows[(metric, n)] = (pre, post)
+
+    def placebo_sd(k, draws=60):
+        out = {}
+        for key, (pre, post) in windows.items():
             est = []
-            for s0 in weeks:
-                pre = t.loc[:, (t.columns >= s0 - pd.Timedelta(weeks=8)) & (t.columns < s0)].sum(axis=1)
-                post = t.loc[:, (t.columns >= s0) & (t.columns < s0 + pd.Timedelta(weeks=n))].sum(axis=1) * 8 / n
-                # pooled ratio-of-sums difference-in-differences (robust to small or negative store GP); random relabelling = placebo
-                for _ in range(20):
-                    flip = rng.random(len(pairs)) < 0.5
-                    a, b = np.where(flip, ct, tr), np.where(flip, tr, ct)
-                    est.append(np.log(post.reindex(a).sum() / pre.reindex(a).sum()) - np.log(post.reindex(b).sum() / pre.reindex(b).sum()))
-            sd = float(np.std(est))
-            power.append({"Metric": metric, "Weeks": n, "Pairs": len(pairs), "Placebo_SD_%": sd * 100,
-                          "Min_Detectable_Change_%": 2.8 * sd * 100, "Expected_change_%": expected[metric],
-                          "Detectable": abs(expected[metric]) >= 2.8 * sd * 100})
-    power = pd.DataFrame(power)
-    sd = power.set_index(["Metric", "Weeks"])["Placebo_SD_%"]
+            for _ in range(draws):
+                c = np.isin(stores, draw(k))
+                est.append(np.log(post[~c].sum(0) / pre[~c].sum(0)) - np.log(post[c].sum(0) / pre[c].sum(0)))
+            out[key] = float(np.std(np.concatenate(est)))
+        return out
+
+    sizes = [6, 8, 10, 12, 15, 20, 30]
+    sds = {k: placebo_sd(k) for k in sizes}
+    share = {}
+    for k in sizes:
+        sh = [info.Weekly_Sales_13w.reindex(draw(k)).sum() / info.Weekly_Sales_13w.sum() for _ in range(40)]
+        share[k] = float(np.mean(sh))
+    size_tab = pd.DataFrame([{"Control_stores": k, "Changed_stores": len(stores) - k, "Control_share_of_sales_%": share[k] * 100,
+                              "GP_MDE_4w_%": 2.8 * sds[k][("GP", 4)] * 100, "GP_MDE_8w_%": 2.8 * sds[k][("GP", 8)] * 100,
+                              "Expected_GP_change_%": expected["GP"],
+                              "Detects_half_the_expected_at_4w": 2.8 * sds[k][("GP", 4)] * 100 <= abs(expected["GP"]) / 2,
+                              "Gain_given_up_8w_$": gain_52w * share[k] * 8 / 52} for k in sizes])
+    ok = size_tab[size_tab.Detects_half_the_expected_at_4w]
+    k = int(ok.Control_stores.min()) if len(ok) else 30
+    size_tab["Chosen"] = size_tab.Control_stores == k
+
+    # pick the control stores: best pre-period tracking of 500 stratified draws
+    g = tabs["GP"].reindex(stores)
+    last = g.loc[:, g.columns > end - pd.Timedelta(weeks=26)].to_numpy(float)
+    best, best_err = None, np.inf
+    for _ in range(500):
+        c = np.isin(stores, draw(k))
+        a, b = last[~c].sum(0), last[c].sum(0)
+        if (a <= 0).any() or (b <= 0).any():
+            continue
+        err = float(np.std(np.log(a / a.mean()) - np.log(b / b.mean())))
+        if err < best_err:
+            best, best_err = c, err
+    ctrl = set(stores[best])
+    tab = info.assign(Role=np.where(info.index.isin(ctrl), "Control (old prices)", "Changed (new prices)"))
+    tab["Weekly_Sales_13w_$"] = tab.Weekly_Sales_13w / FX
+    tab = tab.reset_index().rename(columns={"index": "Store", "Plant": "Store"})[["Store", "Role", "Zone", "Weekly_Sales_13w_$"]]
+    tab = tab.sort_values(["Role", "Weekly_Sales_13w_$"], ascending=[False, False])
+
+    sd = sds[k]
+    power = pd.DataFrame([{"Metric": m, "Weeks": n, "Control_stores": k, "Changed_stores": len(stores) - k, "Placebo_SD_%": sd[(m, n)] * 100,
+                           "Min_Detectable_Change_%": 2.8 * sd[(m, n)] * 100, "Expected_change_%": expected[m],
+                           "Detectable": abs(expected[m]) >= 2.8 * sd[(m, n)] * 100} for m in tabs for n in (4, 8, 12, 16)])
     rollback = pd.DataFrame([
-        {"Level": "Wave", "Check": "GP of changed SKUs, changed vs holdout stores (difference-in-differences)", "When": "every week from week 2",
-         "Pause next wave if": f"below {expected['GP'] - 2 * sd[('GP', 4)]:+.1f}% after 4 weeks (expected {expected['GP']:+.1f}% minus 2 noise SD)",
-         "Roll back the wave if": f"below {-2 * sd[('GP', 4)]:+.1f}% after 4 weeks, or below {-2 * sd[('GP', 8)]:+.1f}% after 8 weeks (GP clearly falling)"},
-        {"Level": "Wave", "Check": "Units of changed SKUs, changed vs holdout stores", "When": "every week from week 2",
-         "Pause next wave if": f"below {expected['Units'] - 2 * sd[('Units', 4)]:+.1f}% after 4 weeks",
-         "Roll back the wave if": f"below {expected['Units'] - 3 * sd[('Units', 4)]:+.1f}% after 4 weeks (units fall far more than planned)"},
-        {"Level": "SKU", "Check": "Units of one SKU in changed stores vs holdout stores", "When": "weekly, 3-week rolling",
+        {"Level": "Wave", "Check": "GP of changed SKUs, changed vs control stores (difference-in-differences)", "When": "every week from week 2",
+         "Pause next wave if": f"below {expected['GP'] - 2 * sd[('GP', 4)] * 100:+.1f}% after 4 weeks (expected {expected['GP']:+.1f}% minus 2 noise SD)",
+         "Roll back the wave if": f"below {-2 * sd[('GP', 4)] * 100:+.1f}% after 4 weeks, or below {-2 * sd[('GP', 8)] * 100:+.1f}% after 8 weeks (GP clearly falling)"},
+        {"Level": "Wave", "Check": "Units of changed SKUs, changed vs control stores", "When": "every week from week 2",
+         "Pause next wave if": f"below {expected['Units'] - 2 * sd[('Units', 4)] * 100:+.1f}% after 4 weeks",
+         "Roll back the wave if": f"below {expected['Units'] - 3 * sd[('Units', 4)] * 100:+.1f}% after 4 weeks (units fall far more than planned)"},
+        {"Level": "SKU", "Check": "Units of one SKU in changed stores vs control stores", "When": "weekly, 3-week rolling",
          "Pause next wave if": "units fall more than 2x the planned loss and more than 15% for 3 weeks",
          "Roll back the wave if": "same for 4 weeks in a row, or an Everyday KVI family loses more than 10%: return to the old price"},
         {"Level": "SKU", "Check": "Hard stops", "When": "every release",
          "Pause next wave if": "price at the till differs from the approved price",
          "Roll back the wave if": "new price below cost, wrong IVA or a pricing error: correct at once"}])
-    return pairs, power, rollback
+    return tab, power, rollback, size_tab, best_err
 
 
 def main():
@@ -248,7 +290,7 @@ def main():
     chg = op["Final_Change_%"].fillna(0) != 0
     e = op[chg].sum(numeric_only=True)
     expected = {"GP": (e.GP_L / e.GP_now - 1) * 100, "Units": (e.Units_L / e.Units_now - 1) * 100, "Sales": (e.Rev_L / e.Rev_now - 1) * 100}
-    pairs, power, rollback = holdout(set(op.index[chg]), expected)
+    stores_tab, power, rollback, size_tab, track_err = holdout(set(op.index[chg]), expected, op["GP_gain_52w_$"].sum())
     wins = pd.DataFrame([impact(weekly, s, e) for s, e in [("2026-11-30", "2027-01-31"), ("2026-12-01", "2026-12-31"), ("2027-01-01", "2027-03-31"),
                                                           ("2026-11-09", "2027-11-01")]])
     op.index.name = "Code"
@@ -266,14 +308,15 @@ def main():
     net = op["GP_gain_52w_$"].sum()
     bridge = pd.DataFrame([
         ("MILP optimiser, best price per SKU", milp),
-        ("Trim: smallest move keeping 90% of each SKU's gain, minimum-gain rule", net - milp),
-        ("= Plan gain, likely (headline)", net),
+        ("Trim and clean-up: smallest move keeping 90% of each SKU's gain, minimum-gain rule (can add gain: it drops moves "
+         "that lose money once shoppers switching between brands is counted)", net - milp),
+        ("Plan gain, likely (headline)", net),
         ("   of which Wave 1", by_wave.get("Wave 1", 0)),
         ("   of which Review then Wave 1", by_wave.get("Review then Wave 1", 0)),
         ("   of which Test", by_wave.get("Test", 0)),
         ("   of which Hold (unchanged SKUs gaining from shoppers switching to them)", by_wave.get("Hold", 0)),
         ("Shelf-price rounding", op["Rounding_GP_effect_$"].sum()),
-        ("= Plan gain after rounding", net + op["Rounding_GP_effect_$"].sum()),
+        ("Plan gain after rounding", net + op["Rounding_GP_effect_$"].sum()),
         ("Cautious case (customers react 1.5x)", op["GP_gain_52w_cautious_$"].sum())],
         columns=["Item", "GP_gain_52w_$"]).round(0)
     with pd.ExcelWriter(OUT / "price_list.xlsx") as xw:
@@ -290,14 +333,15 @@ def main():
         rules.reset_index().to_excel(xw, sheet_name="H3 rules", index=False)
         (rules == "FAIL").sum().to_frame("FAIL").join((rules == "FLAG").sum().to_frame("FLAG")).to_excel(xw, sheet_name="H3 rule counts")
         st[st.Store_Rule != ""].to_excel(xw, sheet_name="H2 store exceptions", index=False)
-        pairs.round(0).to_excel(xw, sheet_name="H7 holdout pairs", index=False)
+        size_tab.round(2).to_excel(xw, sheet_name="H7 holdout size", index=False)
+        stores_tab.round(0).to_excel(xw, sheet_name="H7 holdout stores", index=False)
         power.round(2).to_excel(xw, sheet_name="H7 holdout power", index=False)
         rollback.to_excel(xw, sheet_name="H8 rollback rules", index=False)
         bridge.to_excel(xw, sheet_name="Profit bridge", index=False)
     pd.set_option("display.width", 220)
     print(f"raise {int(rise.sum())} cut {int(cut.sum())} | FAIL {int(op.Rule_FAILs.sum())} | flagged SKUs {int((op.Rule_FLAGs > 0).sum())} | basket {basket:+.2f}% "
           f"({basket / CPI_MONTHLY:.1f} months CPI) | rounding {op['Rounding_GP_effect_$'].sum():+,.0f} $/yr")
-    print(wv.round(1).to_string()); print(wins.round(1).to_string(index=False)); print(power.round(2).to_string(index=False)); print(rollback.to_string(index=False)); print(bridge.to_string(index=False))
+    print(wv.round(1).to_string()); print(wins.round(1).to_string(index=False)); print(size_tab.round(2).to_string(index=False)); print(f"control-store tracking error {track_err:.3f}"); print(power.round(2).to_string(index=False)); print(rollback.to_string(index=False)); print(bridge.to_string(index=False))
     print((rules == "FAIL").sum()[lambda x: x > 0].to_string()); print((rules == "FLAG").sum()[lambda x: x > 0].to_string())
 
 
