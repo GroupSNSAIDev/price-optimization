@@ -1,8 +1,9 @@
 """All-SKU project, phase D: price sensitivity for every ACTIVE SKU (demo steps 8-9 at scale + Conzmo additions).
 
 Data: store x SKU x week (clean/allsku/model_weekly.parquet), Jan 2024 - week of 2 Nov 2026, model-sample rows,
-HRCA out; clearance (below cost), markdown (8% below regular) and transition (week of + after a price step) weeks
-left out. Relative price = SKU real price vs its SubGroup price index in the same store-week (leave-one-out).
+HRCA out; clearance (below cost), markdown (8% below regular), transition (week of + after a price step) and stock-out
+edge weeks (ran out / refilled mid-week, allsku_stockouts.py) left out; full stock-out weeks have no sales row.
+Relative price = SKU real price vs its SubGroup price index in the same store-week (leave-one-out).
 
 D1  Statistical tests per SKU, 3 log-log specifications:
       S1 store FE + controls (season sin/cos, Christmas, payday, holidays, trend), store-clustered SE
@@ -173,7 +174,12 @@ def load(scope):
     d = pd.read_parquet(CL / "model_weekly.parquet", columns=cols)
     cw = pd.read_parquet(CL / "chain_weekly.parquet", columns=["Code", "Week", "Markdown_Week", "Transition_Week"])
     d = d.merge(cw, on=["Code", "Week"], how="left")
-    d = d[d.In_Model_Sample & ~d.Below_Cost_Week.fillna(False) & ~d.Markdown_Week.fillna(False) & ~d.Transition_Week.fillna(False)]
+    # store-weeks that ran out or were refilled mid-week (allsku_stockouts.py): units there are supply, not demand
+    so = pd.read_parquet(CL / "stockout_weeks.parquet", columns=["Plant", "Code", "Week", "Flag"])
+    so = so[so.Flag == "edge"].drop(columns="Flag").assign(Stockout_Edge=1)
+    d = d.merge(so, on=["Plant", "Code", "Week"], how="left")
+    d = d[d.In_Model_Sample & ~d.Below_Cost_Week.fillna(False) & ~d.Markdown_Week.fillna(False) & ~d.Transition_Week.fillna(False)
+          & d.Stockout_Edge.isna()]
     d = d[np.isfinite(d.ln_Qty) & np.isfinite(d.ln_Relative_Price) & d.Code.isin(scope)]
     d["Week_Sin"], d["Week_Cos"] = np.sin(2 * np.pi * d.Week_Of_Year / 52), np.cos(2 * np.pi * d.Week_Of_Year / 52)
     d["Trend_Weeks"] = (d.Week - d.Week.min()).dt.days / 7

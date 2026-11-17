@@ -1,6 +1,7 @@
 """All-SKU project, phases F + G: simulation, profit and price optimisation (chain level, 52 weeks), Max-profit guardrails.
 
-F1  Supply at risk: stores selling in the last 4 weeks < 70% of the usual (weeks 5-26) -> no price cut.
+F1  Supply at risk: stores selling in the last 4 weeks < 70% of the usual (weeks 5-26), or stock-out weeks >= 20% of
+    store-weeks in the last 13 weeks (allsku_stockouts.py) -> no price cut.
 F2  Price grid: -15% .. +15% in 1% steps, limited to each SKU's tested range (5-95% of its own past price moves vs the
     regular price, clipped to 3-15%; 10% max) and the 10% step limit. Units: own response (rise / cut elasticity) plus
     sales won from SubGroup rivals (diversion: share of the lost value that stays in the SubGroup, capped at 60%).
@@ -37,7 +38,7 @@ FX = 1050.0
 MAX_STEP, GRID = 0.10, np.round(np.arange(-0.15, 0.1501, 0.01), 2)
 VOL_CAP = {"A": 0.10, "B": 0.15, "C": 0.15}
 MIN_GAIN_KZ_13W, MIN_GAIN_PCT, SMALLEST_MOVE = 500_000, 2.0, 0.90
-REPRICED_PCT, SUPPLY_RISK, MAX_DIV = 15, 0.70, 0.60
+REPRICED_PCT, SUPPLY_RISK, MAX_DIV, STOCKOUT_RISK = 15, 0.70, 0.60, 0.20
 CPI_MONTHLY = 0.006
 SCARCITY = set(json.loads((ROOT / "analysis" / "pilot" / "optimisation_config_sweetspot.json").read_text())["scarcity_skus"])
 
@@ -71,7 +72,12 @@ def inputs(forecast=None):
     wk = sorted(cw.Week.unique())
     s["Stores_Selling_4w"] = st[wk[-4:]].median(axis=1)
     s["Stores_usual"] = st[wk[-26:-4]].median(axis=1)
-    s["Supply_Risk"] = s.Stores_Selling_4w < SUPPLY_RISK * s.Stores_usual
+    s["Supply_Risk_Stores"] = s.Stores_Selling_4w < SUPPLY_RISK * s.Stores_usual
+    so = pd.read_parquet(CL / "stockout_chain.parquet")
+    so = so[so.Week > end - pd.Timedelta(weeks=13)].groupby("Code").Gap_Stores.sum()
+    sold13 = cw[cw.Week > end - pd.Timedelta(weeks=13)].groupby("Code").Stores_Selling.sum()
+    s["Stockout_13w_%"] = (so.reindex(sold13.index).fillna(0) / (sold13 + so.reindex(sold13.index).fillna(0)).replace(0, np.nan) * 100)
+    s["Supply_Risk"] = s.Supply_Risk_Stores | (s["Stockout_13w_%"].fillna(0) >= STOCKOUT_RISK * 100)
     # recent repricing (median regular price, last 4 weeks vs weeks 14-26)
     pr = reg.pivot_table(index="Code", columns="Week", values="Price_KZ", aggfunc="median")
     s["Repriced_26w_%"] = (pr[[w for w in wk[-4:] if w in pr]].median(axis=1) / pr[[w for w in wk[-26:-13] if w in pr]].median(axis=1) - 1) * 100
