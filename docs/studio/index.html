@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fresmart Pricing Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@400;500;600&family=Roboto:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="studio.css">
+<script src="../d3.min.js"></script>
+</head>
+<body>
+<div class="app">
+  <aside class="side" aria-label="Main navigation">
+    <div class="brand">
+      <img src="fresmart_logo.png" alt="Fresmart">
+      <div><div class="brand-name">Pricing Studio</div><div class="brand-sub">All active articles</div></div>
+    </div>
+    <nav class="nav" id="nav"></nav>
+    <div class="side-foot">
+      <div class="status" id="side-status"><span class="dot"></span><span>Loading…</span></div>
+      <div class="side-meta">Sales and costs to <b id="asof">—</b><br>Gross profit after IVA · US$ at 1,050 Kz</div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="top">
+      <button class="icon-btn menu" id="menu" aria-label="Open navigation">☰</button>
+      <div class="crumb"><span>Price optimisation</span><span class="sep">/</span><b id="crumb">Overview</b></div>
+      <div class="search">
+        <input id="gsearch" type="search" placeholder="Find an article by name or code" autocomplete="off" aria-label="Find an article">
+        <kbd>/</kbd>
+        <div class="results" id="gresults" hidden></div>
+      </div>
+    </header>
+
+    <div class="content" id="content">
+      <div class="loading" id="loading">Loading the price plan…</div>
+    </div>
+  </div>
+</div>
+
+<aside class="drawer" id="drawer" aria-hidden="true" aria-label="Article detail">
+  <div class="drawer-head">
+    <div><div class="eyebrow" id="dr-code">—</div><h2 id="dr-name">—</h2><div class="drawer-tags" id="dr-tags"></div></div>
+    <button class="icon-btn" id="dr-close" aria-label="Close">✕</button>
+  </div>
+  <div class="drawer-body" id="dr-body"></div>
+</aside>
+<div class="scrim" id="scrim" hidden></div>
+<div class="tip" id="tip" hidden></div>
+
+<script src="studio.js"></script>
+</body>
+</html>

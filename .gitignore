@@ -1,4 +1,4 @@
-# Code and method docs only. Data, extracts, outputs and credentials stay out of git.
+# Code, method docs, the Pricing Studio and its password-locked web copy (docs/). Readable studio data, raw extracts, outputs and credentials stay out of git.
 *
 !*/
 !.gitignore
@@ -10,6 +10,10 @@
 !dashboard/studio/studio.css
 !dashboard/studio/studio.js
 !dashboard/studio/fresmart_logo.png
+!dashboard/d3.min.js
+!docs/**
+!/README.md
+!/.gitattributes
 
 # never commit
 .env

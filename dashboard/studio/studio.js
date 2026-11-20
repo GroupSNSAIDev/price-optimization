@@ -215,7 +215,7 @@ $('#dr-close').addEventListener('click', closeDrawer); $('#scrim').addEventListe
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDrawer(); $('#gresults').hidden = true; }
   if (e.key === '/' && document.activeElement.tagName !== 'INPUT') { e.preventDefault(); $('#gsearch').focus(); } });
 
-function loadWeeklySku() { return WSKU ? Promise.resolve() : fetch('data/weekly_sku.json').then((r) => r.json()).then((j) => { WSKU = j; }); }
+function loadWeeklySku() { return WSKU ? Promise.resolve() : getJSON('data/weekly_sku.json').then((j) => { WSKU = j; }); }
 
 /* gain curve for one SKU, −15%..+15% */
 function curveChart(box, s, mark, h = 260) {
@@ -316,7 +316,7 @@ function hierFilter(st, onChange, { article = false, pool = SKUS } = {}) {
 const HIST = {};
 function loadHist(group) {
   const f = M.history_files[group]; if (!f) return Promise.resolve(null);
-  return HIST[f] ? Promise.resolve(HIST[f]) : fetch('data/history/' + f).then((r) => r.json()).then((j) => { HIST[f] = j; return j; });
+  return HIST[f] ? Promise.resolve(HIST[f]) : getJSON('data/history/' + f).then((j) => { HIST[f] = j; return j; });
 }
 
 const articleHead = (s, ...tags) => el('div', { class: 'art-head' }, pathEl(s, s.code), el('h2', {}, s.name), el('div', { class: 'chips' }, tags.filter(Boolean)));
@@ -901,7 +901,44 @@ gs.addEventListener('keydown', (e) => { if (e.key === 'ArrowDown') { gsel = Math
 document.addEventListener('click', (e) => { if (!e.target.closest('.search')) gr.hidden = true; });
 
 // ---------------------------------------------------------------- boot
-Promise.all(['meta', 'skus', 'weekly', 'flags'].map((n) => fetch(`data/${n}.json`).then((r) => { if (!r.ok) throw new Error(n + ' ' + r.status); return r.json(); })))
+/* published copy (docs/): data files are AES-GCM encrypted (scripts/publish_studio.py); the password unlocks them in the browser */
+let KEY = null;
+const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+async function decrypt(buf) {
+  const iv = buf.slice(0, 12), plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, KEY, buf.slice(12));
+  return new Response(new Blob([plain]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+}
+function getJSON(path) {
+  if (!KEY) return fetch(path).then((r) => { if (!r.ok) throw new Error(path + ' ' + r.status); return r.json(); });
+  return fetch(path + '.enc').then((r) => { if (!r.ok) throw new Error(path + ' ' + r.status); return r.arrayBuffer(); }).then((b) => decrypt(new Uint8Array(b))).then(JSON.parse);
+}
+async function deriveKey(pw, lock) {
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name: 'PBKDF2', salt: b64(lock.salt), iterations: lock.iter, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, true, ['decrypt']);
+}
+async function tryKey(k, lock) { KEY = k; try { return (await decrypt(b64(lock.check))) === 'fresmart'; } catch (e) { KEY = null; return false; } }
+function unlock(lock) {
+  return new Promise((resolve) => {
+    const err = el('div', { class: 'lock-err', role: 'alert' });
+    const pw = el('input', { class: 'inp', type: 'password', placeholder: 'Password', autocomplete: 'current-password', 'aria-label': 'Password' });
+    const btn = el('button', { class: 'btn primary', type: 'submit' }, 'Open the studio');
+    const form = el('form', { class: 'lock-card', onsubmit: async (e) => { e.preventDefault(); btn.disabled = true; err.textContent = '';
+      const k = await deriveKey(pw.value, lock);
+      if (await tryKey(k, lock)) { try { sessionStorage.setItem('fps-key', btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.exportKey('raw', k))))); } catch (x) { /* storage blocked */ } $('#lock').remove(); resolve(); }
+      else { err.textContent = 'That password is not right.'; btn.disabled = false; pw.select(); } } },
+      el('img', { src: 'fresmart_logo.png', alt: 'Fresmart', class: 'lock-logo' }), el('h1', {}, 'Pricing Studio'), el('p', {}, 'Confidential. Enter the password you were given.'), pw, btn, err);
+    document.body.append(el('div', { class: 'lock', id: 'lock' }, form)); pw.focus();
+  });
+}
+async function boot() {
+  const lr = await fetch('data/lock.json').catch(() => null);
+  if (!lr || !lr.ok) return;   // local copy: plain data
+  const lock = await lr.json();
+  let saved = null; try { saved = sessionStorage.getItem('fps-key'); } catch (e) { /* storage blocked */ }
+  if (saved && await tryKey(await crypto.subtle.importKey('raw', b64(saved), 'AES-GCM', true, ['decrypt']), lock)) return;
+  await unlock(lock);
+}
+boot().then(() => Promise.all(['meta', 'skus', 'weekly', 'flags'].map((n) => getJSON(`data/${n}.json`))))
   .then(([meta, skus, weekly, flags]) => {
     M = meta; WEEKLY = weekly; FLAGS = flags;
     SKUS = skus.rows.map((row) => Object.fromEntries(skus.columns.map((c, i) => [c, row[i]])));
